@@ -3,3 +3,5 @@
   - Add support for escapes in parser definition string literals.
 - Add support for various convenience operators in parser definition language.
 - Improve definition parse efficiency by using slices more than vectors
+- Add comments to definition language
+- Add useful builtins (especially whitespace, lowercase, uppercase, numbers)

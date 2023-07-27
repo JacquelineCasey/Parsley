@@ -29,6 +29,7 @@ pub fn define_parser<T: Token>(definition: String) -> Result<Parser<T>, Definiti
         .map(|slice| parse_rule(slice))
         .collect::<Result<HashMap<String, RuleExpression>, DefinitionError>>()?;
 
+    println!("{:?}", rules_map);
 
     let parser = Parser::<T>::new();
 
@@ -61,26 +62,33 @@ enum Operator {
     Colon,
     Semicolon,
     Bar,
+    Plus,
+    Star,
+    QuestionMark
     // More to come as the language gets more interesting
 }
 // Note: Ord definition reflects precedence, so Bar has least precedence.
 
 /* Describes the rules for what matches a specific rule. The name of the associated
  * rule is stored externally (i.e. as a hash map key) */
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 enum RuleExpression {
     RuleName (String),
     Literal (String),
     Concatenation (Vec<RuleExpression>),
     Alternatives (Vec<RuleExpression>),
+    Optional (Box<RuleExpression>),
+    OneOrMore (Box<RuleExpression>),
+    Many (Box<RuleExpression>)
 }
 
 /* Converts a string into tokens. Whitespace is removed, but considered in order
- * to differentiate adjacent identifiers. */
+ * to differentiate adjacent identifiers. Also strips comments */
 fn tokenize(definition: String) -> Result<Vec<DefinitionToken>, DefinitionError> {
     let mut tokens = Vec::new();
     let mut curr_token = String::new();
     let mut quote_mode = false;
+    let mut comment_mode = false;
 
     let push_curr_token = |curr_token: &mut String, tokens: &mut Vec<DefinitionToken>| -> Result<(), DefinitionError>{
         if !curr_token.is_empty() {
@@ -91,7 +99,13 @@ fn tokenize(definition: String) -> Result<Vec<DefinitionToken>, DefinitionError>
     };
 
     for char in definition.chars() {
-        if char == '"' && !quote_mode {
+        if comment_mode && char == '\n' {
+            comment_mode = false;
+        }
+        else if comment_mode {
+            continue;
+        }
+        else if char == '"' && !quote_mode {
             quote_mode = true;
             push_curr_token(&mut curr_token, &mut tokens)?;
             curr_token.push('"');
@@ -104,18 +118,20 @@ fn tokenize(definition: String) -> Result<Vec<DefinitionToken>, DefinitionError>
         else if quote_mode {
             curr_token.push(char);
         }
+        else if char == '#' {
+            comment_mode = true;
+            push_curr_token(&mut curr_token, &mut tokens)?;
+        }
+        else if char.is_whitespace() {
+            push_curr_token(&mut curr_token, &mut tokens)?;
+        }
+        else if is_identifier_char(char) {
+            curr_token.push(char);
+        }
         else {
-            if char.is_whitespace() {
-                push_curr_token(&mut curr_token, &mut tokens)?;
-            }
-            else if is_identifier_char(char) {
-                curr_token.push(char);
-            }
-            else {
-                push_curr_token(&mut curr_token, &mut tokens)?;
+            push_curr_token(&mut curr_token, &mut tokens)?;
 
-                tokens.push(string_to_token(char.to_string())?);
-            }
+            tokens.push(string_to_token(char.to_string())?);
         }
     }
 
@@ -127,9 +143,12 @@ fn tokenize(definition: String) -> Result<Vec<DefinitionToken>, DefinitionError>
 // Weird semantics for efficiency within above algorithm
 fn string_to_token(mut string: String) -> Result<DefinitionToken, DefinitionError> {
     match string.as_str() {
-        ":" => Ok(DefinitionToken::Operator(Operator::Colon)),
         ";" => Ok(DefinitionToken::Operator(Operator::Semicolon)),
+        ":" => Ok(DefinitionToken::Operator(Operator::Colon)),
         "|" => Ok(DefinitionToken::Operator(Operator::Bar)),
+        "+" => Ok(DefinitionToken::Operator(Operator::Plus)),
+        "*" => Ok(DefinitionToken::Operator(Operator::Star)),
+        "?" => Ok(DefinitionToken::Operator(Operator::QuestionMark)),
         "(" => Ok(DefinitionToken::LeftParenthesis),
         ")" => Ok(DefinitionToken::RightParenthesis),
         _ if string.chars().nth(0) == Some('"') && string.chars().last() == Some('"') 
@@ -183,15 +202,6 @@ fn parse_expression(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, Defi
         return Err(DefinitionError("Encountered left parenthesis at left of subexpression".to_string()));
     }
 
-    if tokens.len() == 1 {
-        if let DefinitionToken::Identifier(rule_name) = &tokens[0] {
-            return Ok(RuleExpression::RuleName(rule_name.to_string()));
-        }
-        if let DefinitionToken::StringLiteral(literal) = &tokens[0] {
-            return Ok(RuleExpression::Literal(literal.to_string()));
-        }
-    }
-
     /* Scan and determine most relevant operator (least precedence!). */
 
     let mut min_precedence_indices = vec![];
@@ -239,9 +249,8 @@ fn parse_expression(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, Defi
             Ok(RuleExpression::Alternatives(sub_expressions))
         }
 
-        DefinitionToken::Operator(a) => Err(DefinitionError(format!("Bad operator {:?}", a))),
-
-        DefinitionToken::Identifier(_) | DefinitionToken::StringLiteral(_) => {
+        DefinitionToken::Identifier(_) | DefinitionToken::StringLiteral(_) 
+        | DefinitionToken::Operator(Operator::Plus | Operator::Star | Operator::QuestionMark) => {
             let mut paren_nesting = 0;
             let mut curr_left_paren = 0;
 
@@ -261,18 +270,36 @@ fn parse_expression(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, Defi
                     }
                 }
                 else if paren_nesting == 0 {
-                    if let DefinitionToken::Identifier(rule_name) = &tokens[i] {
-                        sub_expressions.push(RuleExpression::RuleName(rule_name.clone()));
-                    }
-
-                    if let DefinitionToken::StringLiteral(literal) = &tokens[i] {
-                        sub_expressions.push(RuleExpression::Literal(literal.clone()))
+                    match &tokens[i] {
+                        DefinitionToken::Identifier(rule_name)
+                            => sub_expressions.push(RuleExpression::RuleName(rule_name.clone())),
+                        DefinitionToken::StringLiteral(literal)
+                            => sub_expressions.push(RuleExpression::Literal(literal.clone())),
+                        DefinitionToken::Operator(Operator::Plus) => {
+                            let len = sub_expressions.len();  // appease borrow checker
+                            sub_expressions[len - 1] = RuleExpression::OneOrMore(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                        }
+                        DefinitionToken::Operator(Operator::Star) => {
+                            let len = sub_expressions.len();  
+                            sub_expressions[len - 1] = RuleExpression::Many(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                        }
+                        DefinitionToken::Operator(Operator::QuestionMark) => {
+                            let len = sub_expressions.len();  
+                            sub_expressions[len - 1] = RuleExpression::Optional(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                        }
+                        _ => ()
                     }
                 }
+            }
+
+            if sub_expressions.len() == 1 {
+                return Ok(sub_expressions[0].clone());
             }
             
             Ok(RuleExpression::Concatenation(sub_expressions))
         }
+
+        DefinitionToken::Operator(a) => Err(DefinitionError(format!("Bad operator {:?}", a))),
 
         DefinitionToken::LeftParenthesis => Err(DefinitionError("Subexpression is only parentheses".to_string())),
 
@@ -282,6 +309,9 @@ fn parse_expression(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, Defi
 
 fn validate_parser<T: Token>(parser: Parser<T>) -> Result<Parser<T>, DefinitionError> {
     todo!()
+    // Ensure all rules are spelled correctly
+    // Ensure at most one modifier per literal (basically, ensure Definition Language Grammar)
+    // Ensure no left recursion
 }
 
 
@@ -368,5 +398,32 @@ mod tests {
                 ]),
             ])))
         );
+    }
+
+    #[test]
+    fn test_define_parser() {
+        /* Taken from https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form,
+         * a simple Pascal like langauge. */
+
+        let def = r#"
+        # This is a comment!
+        program : "PROGRAM" white_space identifier white_space 
+                   "BEGIN" white_space 
+                   (assignment ";" white_space)*
+                   "END." ;
+        identifier : alphabetic_character (alphabetic_character | digit)* ;
+        number : "-"? digit+  ;
+        # string : '"' ( all characters - '"' ) '"' ;
+        assignment : identifier ":=" ( number | identifier ) ; # | string
+        alphabetic_character : "A" | "B" | "C" | "D" | "E" | "F" | "G"
+                             | "H" | "I" | "J" | "K" | "L" | "M" | "N"
+                             | "O" | "P" | "Q" | "R" | "S" | "T" | "U"
+                             | "V" | "W" | "X" | "Y" | "Z" ;
+        digit : "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+        white_space : " " ;
+        # all characters : (alphabetic_character | white_space | digit) ;
+        "#.to_string();
+
+        let _p : Parser<crate::parse::CharToken> = define_parser(def).expect("ok");
     }
 }
