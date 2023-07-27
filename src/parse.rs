@@ -1,17 +1,10 @@
 
-use std::marker::PhantomData;
+use crate::define::RuleExpression;
 
+use std::collections::HashMap;
 
 pub struct Parser<T: Token> {
-    pub(crate) _phantom: PhantomData<T>  // appease compiler by telling it we actually use T
-
-    // TODO!
-}
-
-impl<T: Token> Parser<T> {
-    pub(crate) fn new() -> Parser<T> {
-        Parser { _phantom: std::marker::PhantomData }
-    }
+    pub(crate) rules: HashMap<String, RuleExpression<T>>
 }
 
 pub struct SyntaxTree<T: Token> {
@@ -19,19 +12,42 @@ pub struct SyntaxTree<T: Token> {
     // TODO!
 }
 
-pub trait Token {
-    // TODO!
+/* Represents a token, namely a type (used for parsing) and content (used after parsing). 
+ *
+ * This is a trait so that users can define parsers over specific alphabets beyond
+ * what we support out of the box. It can also be useful to allow a language to
+ * provide detailed error messages, or simply to run faster (tokenization is often O(n),
+ * and most parsing algorithms are O(n^3) worst case, so preprocessing to shorten the
+ * list of tokens can be useful).
+ * 
+ * Tokens need not track their own location in the source file, that will eventually
+ * be done by the parser. */
+pub trait Token : Sized + Clone + std::fmt::Debug {
+    /* Converts a literal string in the definition language into a sequence of
+     * tokens. Escape sequences are built in as part of the definition language,
+     * so the escape sequences need not be processed here.
+     * 
+     * Most user defined token types will not have this capability. If this returns
+     * null, then define_parser() will return an error if you use a literal.
+     * 
+     * Notably, the predefined CharToken does support this feature. */
+    fn token_sequence_from_literal(_literal: &str) -> Option<Vec<Self>> {
+        None
+    }
 }
 
-//
-
+/* A token that represents  */
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharToken {
-    pub num: i32
-    // TODO!   
+    /* Unlike most tokens, a single field is sufficient, as all token_types have
+     * a single possible value (the character). */
+    token_type: char,  
 }
 
 impl Token for CharToken {
-    // TODO!
+    fn token_sequence_from_literal(literal: &str) -> Option<Vec<Self>> {
+        return Some(literal.chars().map(|c| CharToken {token_type: c}).collect())
+    }
 }
 
 impl<T: Token> Parser<T> {
