@@ -211,7 +211,7 @@ impl<T: Token> Parser<T> {
                 if let RuleExpression::RuleName(_) = ancestor.expr {
                     let parent_tree = tree_lookup[&HashableRc::new(ancestor.clone())].clone();
                     
-                    match &mut *(*parent_tree).borrow_mut() {
+                    match &mut *parent_tree.borrow_mut() {
                         IntermediateSyntaxTree::RuleNode {rule_name: _, subexpressions} => {
                             subexpressions.push(tree.clone());
                         }
