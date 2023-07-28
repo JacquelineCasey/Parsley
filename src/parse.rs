@@ -116,8 +116,8 @@ impl<T: Token> Parser<T> {
          * When the algorithm is finished, the last layer (gss[tokens.len()])
          * holds nodes representing parser processes that have consumed all tokens. */
         let mut gss: Vec<Vec<Rc<GSSLink<T>>>> = vec![
-            GSSNode::resolve_to_terminals(root_link.node.clone(), &self)?.into_iter()
-                .map(|node| Rc::new(GSSLink {node: node, prev: vec![root_link.clone()]}))
+            GSSNode::resolve_to_terminals(Rc::clone(&root_link.node), &self)?.into_iter()
+                .map(|node| Rc::new(GSSLink {node: node, prev: vec![Rc::clone(&root_link)]}))
                 .collect()
         ];
 
@@ -126,8 +126,8 @@ impl<T: Token> Parser<T> {
 
             for link in gss.last().ok_or(ParseError("gss initialized".to_string()))? {
                 next_layer.extend(
-                    GSSNode::advance_token(link.node.clone(), &token, &self)?.into_iter()
-                        .map(|node| Rc::new(GSSLink {node: node.clone(), prev: vec![link.clone()]}))
+                    GSSNode::advance_token(Rc::clone(&link.node), &token, &self)?.into_iter()
+                        .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(&link)]}))
                         .collect::<Vec<_>>()
                 );
             }
@@ -156,7 +156,7 @@ impl<T: Token> Parser<T> {
                 0 => None,
                 _ => Some(&link.prev[0])
             }
-        ).map(|link| link.node.clone())
+        ).map(|link| Rc::clone(&link.node))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -168,16 +168,16 @@ impl<T: Token> Parser<T> {
         
         let mut positions = HashMap::new(); // token id, or id of leftmost token under a rule 
         for (i, node) in backtrace.into_iter().enumerate() {
-            positions.insert(HashableRc::new(node.clone()), i);
+            positions.insert(HashableRc::new(Rc::clone(&node)), i);
 
             let mut curr_node = &node.parent;
             while let Some(ancestor) = curr_node {
                 if let RuleExpression::RuleName(_) = ancestor.expr {
-                    if positions.contains_key(&HashableRc::new(ancestor.clone())) {
+                    if positions.contains_key(&HashableRc::new(Rc::clone(ancestor))) {
                         break;
                     }
                     else {
-                        positions.insert(HashableRc::new(ancestor.clone()), i);
+                        positions.insert(HashableRc::new(Rc::clone(ancestor)), i);
                     }
                 }
                 
@@ -199,7 +199,7 @@ impl<T: Token> Parser<T> {
         unlinked_trees.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
 
         let tree_lookup = unlinked_trees.clone().into_iter()
-            .map(|(tree, node, _)| (HashableRc::new(node.clone()), tree))
+            .map(|(tree, node, _)| (HashableRc::new(Rc::clone(&node)), tree))
             .collect::<HashMap<_, _>>();
 
         let mut root_tree = None;
@@ -209,11 +209,11 @@ impl<T: Token> Parser<T> {
             let mut curr_node = node;
             while let Some(ancestor) = &curr_node.parent {
                 if let RuleExpression::RuleName(_) = ancestor.expr {
-                    let parent_tree = tree_lookup[&HashableRc::new(ancestor.clone())].clone();
+                    let parent_tree = Rc::clone(&tree_lookup[&HashableRc::new(Rc::clone(ancestor))]);
                     
                     match &mut *parent_tree.borrow_mut() {
                         IntermediateSyntaxTree::RuleNode {rule_name: _, subexpressions} => {
-                            subexpressions.push(tree.clone());
+                            subexpressions.push(Rc::clone(&tree));
                         }
                         IntermediateSyntaxTree::TokenNode(_) => panic!("Known to be RuleNode")
                     }
@@ -221,11 +221,11 @@ impl<T: Token> Parser<T> {
                     break;
                 }
 
-                curr_node = curr_node.clone().parent.clone().expect("Known to be Some()");
+                curr_node = curr_node.parent.clone().expect("Known to be Some()");
             }
 
             if let None = curr_node.parent { 
-                root_tree = Some(tree_lookup[&HashableRc::new(curr_node.clone())].clone());
+                root_tree = Some(tree_lookup[&HashableRc::new(curr_node)].clone());
             }
         }
 
@@ -354,7 +354,7 @@ impl<'a, T: Token> GSSNode<'a, T> {
                     else {
                         Self::resolve_to_terminals(Rc::new(GSSNode {
                             expr: &sub_exprs[i+1], 
-                            parent: Some(node.clone()),
+                            parent: Some(Rc::clone(&node)),
                             parent_data: GSSParentData::Index(i+1)
                         }), parser)
                     }
@@ -374,7 +374,7 @@ impl<'a, T: Token> GSSNode<'a, T> {
                     Some(parent) => Ok(
                         Self::resolve_to_terminals(Rc::new(GSSNode { 
                             expr: sub_expr, 
-                            parent: Some(node.clone()), 
+                            parent: Some(Rc::clone(&node)), 
                             parent_data: GSSParentData::NoData 
                         }), parser)?.into_iter()
                             .chain(Self::advance_auto(parent, parser, node.parent_data)?.into_iter())
@@ -409,7 +409,7 @@ impl<'a, T: Token> GSSNode<'a, T> {
                     .map(|expr| 
                         Self::resolve_to_terminals(Rc::new(GSSNode {
                             expr,
-                            parent: Some(node.clone()),
+                            parent: Some(Rc::clone(&node)),
                             parent_data: GSSParentData::NoData
                         }), parser)
                     )
@@ -426,7 +426,7 @@ impl<'a, T: Token> GSSNode<'a, T> {
                 Ok(
                     Self::resolve_to_terminals(Rc::new(GSSNode {
                         expr: sub_expr,
-                        parent: Some(node.clone()),
+                        parent: Some(Rc::clone(&node)),
                         parent_data: GSSParentData::NoData
                     }), parser)?.into_iter()
                         .chain(Self::advance_auto(node, parser, GSSParentData::NoData)?.into_iter())
