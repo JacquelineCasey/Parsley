@@ -2,7 +2,6 @@
 use crate::define::RuleExpression;
 
 use hashable_rc::HashableRc;
-use indoc::indoc;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -452,6 +451,9 @@ impl<'a, T: Token> GSSNode<'a, T> {
 mod tests {
     use super::*;
 
+    use indoc::indoc;
+
+    
     #[test]
     fn parsing_does_not_explode_color() {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
