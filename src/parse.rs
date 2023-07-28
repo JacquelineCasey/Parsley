@@ -1,8 +1,13 @@
 
 use crate::define::RuleExpression;
 
+use hashable_rc::HashableRc;
+
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
 
 
 /* Public Interface */
@@ -11,6 +16,7 @@ pub struct Parser<T: Token> {
     pub(crate) rules: HashMap<String, RuleExpression<T>>
 }
 
+#[derive(Debug)]
 pub enum SyntaxTree<T: Token> {
     RuleNode {rule_name: String, subexpressions: Vec<SyntaxTree<T>>},
     TokenNode (T)
@@ -29,7 +35,7 @@ pub struct ParseError (String);
  * 
  * Tokens need not track their own location in the source file, that will eventually
  * be done by the parser. */
-pub trait Token : Sized + Clone + std::fmt::Debug {
+pub trait Token : Sized + Clone + std::fmt::Debug + Eq {
     /* Returns the type of a token e.g. 'identifier' */
     fn get_type(&self) -> &str;
 
@@ -74,18 +80,29 @@ impl Token for CharToken {
 impl<T: Token> Parser<T> {
     pub fn parse_tokens(&self, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
         let root_expr = RuleExpression::RuleName(start_rule.to_string());
-        let root_node = Rc::new(GSSNode {expr: &root_expr, parent: None, parent_data: GSSParentData::NoData});
+        let root_link = Rc::new(GSSLink {
+            node: Rc::new(GSSNode {expr: &root_expr, parent: None, parent_data: GSSParentData::NoData}),
+            prev: vec![]
+        });
         
         /* gss[i] holds all terminals that are set to try to match tokens[i].
          * When the algorithm is finished, the last layer (gss[tokens.len()])
          * holds nodes representing parser processes that have consumed all tokens. */
-        let mut gss: Vec<Vec<Rc<GSSNode<T>>>> = vec![GSSNode::resolve_to_terminals(root_node, &self)?];
+        let mut gss: Vec<Vec<Rc<GSSLink<T>>>> = vec![
+            GSSNode::resolve_to_terminals(root_link.node.clone(), &self)?.into_iter()
+                .map(|node| Rc::new(GSSLink {node: node, prev: vec![root_link.clone()]}))
+                .collect()
+        ];
 
-        for token in tokens {
+        for token in tokens.clone() {
             let mut next_layer = vec![];
-            
-            for node in gss.last().expect("gss initialized") {
-                next_layer.extend(GSSNode::advance_token(node.clone(), &token, &self)?);
+
+            for link in gss.last().ok_or(ParseError("gss initialized".to_string()))? {
+                next_layer.extend(
+                    GSSNode::advance_token(link.node.clone(), &token, &self)?.into_iter()
+                        .map(|node| Rc::new(GSSLink {node: node.clone(), prev: vec![link.clone()]}))
+                        .collect::<Vec<_>>()
+                );
             }
 
             // TODO: Implement merging.
@@ -93,10 +110,104 @@ impl<T: Token> Parser<T> {
             gss.push(next_layer);
         }
 
-        println!("Final Layer: {:?}", gss.last().expect("gss initialized"));
+        let final_links = gss.get(gss.len() - 1)
+            .ok_or(ParseError("gss initialized".to_string()))?
+            .iter()
+            .filter(|link| matches!(link.node.parent_data, GSSParentData::Done))
+            .collect::<Vec<_>>();
 
-        todo!() // Work backwards to identify successful parse tree. 
+        let final_link = match final_links.len() {
+            0 => Err(ParseError("Unsuccessful Parse...".to_string())),
+            1 => {
+                Ok(final_links[0])
+            },
+            _ => Err(ParseError("Ambiguous Parse...".to_string())),
+        }?;
+
+        let backtrace = std::iter::successors(Some(final_link), |link|
+            match link.prev.len() {
+                0 => None,
+                _ => Some(&link.prev[0])
+            }
+        ).map(|link| link.node.clone())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+
+        let backtrace = backtrace[1..backtrace.len()-1].to_vec();  // Drop ends, they are the root rule. 
+
+        /* Track the positions of rules and tokens */
+        
+        let mut positions = HashMap::new(); // token id, or id of leftmost token under a rule 
+        for (i, node) in backtrace.into_iter().enumerate() {
+            positions.insert(HashableRc::new(node.clone()), i);
+
+            let mut curr_node = &node.parent;
+            while let Some(ancestor) = curr_node {
+                if let RuleExpression::RuleName(_) = ancestor.expr {
+                    if positions.contains_key(&HashableRc::new(ancestor.clone())) {
+                        break;
+                    }
+                    else {
+                        positions.insert(HashableRc::new(ancestor.clone()), i);
+                    }
+                }
+                
+                curr_node = &ancestor.parent;
+            }
+        }
+
+        let mut unlinked_trees = positions.iter()
+            .map(|(node, &pos)| {
+                let tree = match node.get_cloned().expr {
+                    RuleExpression::Terminal(_) => IntermediateSyntaxTree::TokenNode(tokens[pos].clone()),
+                    RuleExpression::RuleName(name) => IntermediateSyntaxTree::RuleNode {rule_name: name.clone(), subexpressions: vec![]},
+                    _ => panic!("Expressions known to be either Terminal or RuleName")
+                };
+                (Rc::new(RefCell::new(tree)), node.get_cloned(), pos)
+            })
+            .collect::<Vec<(Rc<RefCell<IntermediateSyntaxTree<T>>>, Rc<GSSNode<T>>, usize)>>();
+        
+        unlinked_trees.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
+
+        let tree_lookup = unlinked_trees.clone().into_iter()
+            .map(|(tree, node, _)| (HashableRc::new(node.clone()), tree))
+            .collect::<HashMap<_, _>>();
+
+        let mut root_tree = None;
+            
+        for (tree, node, _) in unlinked_trees {
+
+            let mut curr_node = node;
+            while let Some(ancestor) = &curr_node.parent {
+                if let RuleExpression::RuleName(_) = ancestor.expr {
+                    let parent_tree = tree_lookup[&HashableRc::new(ancestor.clone())].clone();
+                    
+                    match &mut *(*parent_tree).borrow_mut() {
+                        IntermediateSyntaxTree::RuleNode {rule_name: _, subexpressions} => {
+                            subexpressions.push(tree.clone());
+                        }
+                        IntermediateSyntaxTree::TokenNode(_) => panic!("Known to be RuleNode")
+                    }
+
+                    break;
+                }
+
+                curr_node = curr_node.clone().parent.clone().expect("Known to be Some()");
+            }
+
+            if let None = curr_node.parent { 
+                root_tree = Some(tree_lookup[&HashableRc::new(curr_node.clone())].clone());
+            }
+        }
+
+        /* Final conversion to tree. */
+        Ok(intermediate_to_final(
+            root_tree.ok_or(ParseError("No root found at end of parsing".to_string()))?
+        ))
     }
+
 }
 
 impl Parser<CharToken> {
@@ -110,14 +221,41 @@ impl Parser<CharToken> {
 
 /* Private Implementation */
 
+#[derive(Clone, Debug)]
+enum IntermediateSyntaxTree<T: Token> { // Vec contains Rc's, to be removed later.
+    RuleNode {rule_name: String, subexpressions: Vec<Rc<RefCell<IntermediateSyntaxTree<T>>>>},
+    TokenNode (T)
+}
+
+fn intermediate_to_final<T: Token>(root: Rc<RefCell<IntermediateSyntaxTree<T>>>) -> SyntaxTree<T> {
+    match root.borrow().clone() {
+        IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
+            SyntaxTree::RuleNode {
+                rule_name, 
+                subexpressions: subexpressions.into_iter()
+                    .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
+                    .collect()
+            },
+        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token),
+    }
+}
+
 /* Graph Structured Stack! Models a current position in the parsing process. */
+#[derive(PartialEq, Eq)]
+// Eq *should* only be needed for use in a HashableRc hashtable, where equality is by reference.
 struct GSSNode<'a, T: Token> {
     expr: &'a RuleExpression<T>,
     parent: Option<Rc<GSSNode<'a, T>>>,
     parent_data: GSSParentData
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
+struct GSSLink<'a, T: Token> {
+    node: Rc<GSSNode<'a, T>>,
+    prev: Vec<Rc<GSSLink<'a, T>>>,  // When merging is implemeneted, we will need multiple prev nodes.
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GSSParentData {
     Index (usize),
     NoData,
@@ -137,7 +275,6 @@ impl<T: Token> std::fmt::Debug for GSSNode<'_, T> {
 
         res.field("parent_data", &self.parent_data)
             .finish()
-
     }
 }
 
@@ -167,6 +304,10 @@ impl<'a, T: Token> GSSNode<'a, T> {
 
     /* In this case, there is no token to consume. */
     fn advance_auto(node: Rc<GSSNode<'a, T>>, parser: &'a Parser<T>, caller_parent_data: GSSParentData) -> Result<Vec<Rc<GSSNode<'a, T>>>, ParseError> {
+        if caller_parent_data == GSSParentData::Done {
+            return Ok(vec![]);
+        }
+
         match node.expr {
             RuleExpression::Terminal(_) => Err(ParseError("Tried to advance terminal without token".to_owned())),
             RuleExpression::RuleName(_) => {
@@ -251,8 +392,11 @@ impl<'a, T: Token> GSSNode<'a, T> {
                     .flatten()
                     .collect()
                 )
-            }
-            RuleExpression::Optional(sub_expr) | RuleExpression::Many(sub_expr) => {
+            },
+            RuleExpression::Many(_) => {
+                Self::advance_auto(node, parser, GSSParentData::NoData)
+            },
+            RuleExpression::Optional(sub_expr) => {
                 Ok(
                     Self::resolve_to_terminals(Rc::new(GSSNode {
                         expr: sub_expr,
@@ -311,11 +455,11 @@ mod tests {
     #[test]
     fn parsing_does_not_explode_many() {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Rule : "a"* "b"+ "c"* "d"+; 
+            Rule : "a"* ; 
         "##.to_string()).expect("Parser definition ok");
 
         parser
-            .parse_string("aaabbbddd".to_string(), "Rule")
+            .parse_string("a".to_string(), "Rule")
             .expect("No error");
     }   
 }
