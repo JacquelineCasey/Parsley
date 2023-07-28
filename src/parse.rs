@@ -2,12 +2,11 @@
 use crate::define::RuleExpression;
 
 use hashable_rc::HashableRc;
+use indoc::indoc;
 
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-
 
 
 /* Public Interface */
@@ -20,6 +19,35 @@ pub struct Parser<T: Token> {
 pub enum SyntaxTree<T: Token> {
     RuleNode {rule_name: String, subexpressions: Vec<SyntaxTree<T>>},
     TokenNode (T)
+}
+
+impl<T: Token> std::fmt::Display for SyntaxTree<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Syntax Tree {")?;
+        self.helper_fmt(1, f)?;
+        f.write_str("\n}")
+    }
+}
+
+impl<T: Token> SyntaxTree<T> {
+    fn helper_fmt(&self, level: usize, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("\n")?;
+        f.write_str(&std::iter::repeat(' ').take(level * 4).collect::<String>())?;
+        match self {
+            SyntaxTree::RuleNode {rule_name, subexpressions} => {
+                f.write_str(&rule_name)?;
+                for expr in subexpressions {
+                    expr.helper_fmt(level + 1, f)?;
+                    // f.write_str("\n")?
+                }
+                Ok(())
+            },
+            SyntaxTree::TokenNode(token) => {
+                f.write_str(&format!("token ({})", token.get_contents()))
+            }
+        }
+
+    }
 }
 
 #[derive(Debug)]
@@ -278,7 +306,6 @@ impl<T: Token> std::fmt::Debug for GSSNode<'_, T> {
     }
 }
 
-
 impl<'a, T: Token> GSSNode<'a, T> {
     /* Returns a set of all next terminal expressions to parse, modelling the next
      * step after consuming a token in a given state. */
@@ -435,9 +462,34 @@ mod tests {
             HexNum: Num | "A" | "B" | "C" ; # Proof of concept
         "##.to_string()).expect("Parser definition ok");
 
-        parser
+        let tree = parser
             .parse_string("Color (1 3 0)".to_string(), "Color")
             .expect("No error");
+
+        println!("{}", tree);
+
+        assert_eq!(tree.to_string(), indoc! {"
+        Syntax Tree {
+            Color
+                RGB
+                    token (C)
+                    token (o)
+                    token (l)
+                    token (o)
+                    token (r)
+                    token ( )
+                    token (()
+                    Num
+                        token (1)
+                    token ( )
+                    Num
+                        token (3)
+                    token ( )
+                    Num
+                        token (0)
+                    token ())
+        }"}
+        );
     }
 
     #[test]
@@ -447,19 +499,52 @@ mod tests {
             AddExpr: Num ("+" AddExpr)? ;
         "##.to_string()).expect("Parser definition ok");
 
-        parser
+        let tree = parser
             .parse_string("1+2+3+4".to_string(), "AddExpr")
             .expect("No error");
+
+        assert_eq!(tree.to_string(), indoc! {"
+            Syntax Tree {
+                AddExpr
+                    Num
+                        token (1)
+                    token (+)
+                    AddExpr
+                        Num
+                            token (2)
+                        token (+)
+                        AddExpr
+                            Num
+                                token (3)
+                            token (+)
+                            AddExpr
+                                Num
+                                    token (4)
+            }"}
+        );
     }
 
     #[test]
     fn parsing_does_not_explode_many() {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Rule : "a"* ; 
+            Rule : "a"* "b"+ "c"* "d"+; 
         "##.to_string()).expect("Parser definition ok");
 
-        parser
-            .parse_string("a".to_string(), "Rule")
+        let tree = parser
+            .parse_string("abbdddd".to_string(), "Rule")
             .expect("No error");
+
+        assert_eq!(tree.to_string(), indoc! {"
+            Syntax Tree {
+                Rule
+                    token (a)
+                    token (b)
+                    token (b)
+                    token (d)
+                    token (d)
+                    token (d)
+                    token (d)
+            }"}
+        );
     }   
 }
