@@ -286,19 +286,21 @@ fn intermediate_to_final<T: Token>(root: Rc<RefCell<IntermediateSyntaxTree<T>>>)
     }
 }
 
-/* Graph Structured Stack! Models a current position in the parsing process. */
+/* Graph Structured Stack! A node models a current position in the parsing process. */
 #[derive(PartialEq, Eq)]
 // Eq *should* only be needed for use in a HashableRc hashtable, where equality is by reference.
 struct GSSNode<'a, T: Token> {
     expr: &'a RuleExpression<T>,
-    parent: Option<Rc<GSSNode<'a, T>>>,
-    parent_data: GSSParentData
+    parent: Option<Rc<GSSNode<'a, T>>>, // Corresponds to the parent expression.
+    parent_data: GSSParentData // Corresponds to the data regarding this node's relationship to its parent. i.e. which index of the concatenation.
 }
 
+// Represents a link between two GSSNodes, where `node` is the current node and `prev` is a node whose continuation
+// leads to `node`.
 #[derive(Debug)]
 struct GSSLink<'a, T: Token> {
     node: Rc<GSSNode<'a, T>>,
-    prev: Vec<Rc<GSSLink<'a, T>>>,  // When merging is implemeneted, we will need multiple prev nodes.
+    prev: Vec<Rc<GSSLink<'a, T>>>,  // Note: When merging is implemeneted, we will need multiple prev nodes.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -548,7 +550,9 @@ mod tests {
     #[test]
     fn parsing_does_not_explode_many() {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Rule : "a"* "b"+ "c"* "d"+; 
+            Rule : ManyA "b"+ ManyC "d"+;
+            ManyA: "a"*;
+            ManyC: "c"*; 
         "##.to_string()).expect("Parser definition ok");
 
         let tree = parser
@@ -558,14 +562,20 @@ mod tests {
         assert_eq!(tree.to_string(), indoc! {"
             Syntax Tree {
                 Rule
-                    token (a)
+                    ManyA
+                        token (a)
                     token (b)
                     token (b)
                     token (d)
                     token (d)
                     token (d)
                     token (d)
-            }"}
+            }"} // Note that ManyC is not shown at all... We kinda have to accept this
+            // since otherwise we would have to figure out after the fact where ManyC
+            // fits in, which could be hard if for example it were surrounded by
+            // other ManyC's that did parse (especially if they had quantifiers).
+            // Basically, we would have to rethink what data ends up in the GSS,
+            // and that sounds really unpleasant.
         );
     }   
 }
