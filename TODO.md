@@ -1,10 +1,11 @@
 
-- Add support for escapes in parser definition string literals.
 - Improve definition parse efficiency by using slices more than vectors.
 - Add useful builtins (especially whitespace, lowercase, uppercase, numbers).
 - Actually do parser validation.
 - Improve actual parse efficiency by using slices more than vectors
-- Handle ambiguous parse
+- Merge parser processes that reach the same state, or maybe just declare an ambiguous parse?
+- Handle ambiguous parse are failed parse. Ideally a failed parse should identify
+  where the parse goes wrong, i.e. how far along parsing stopped.
 
 - Maybe we should seperate Tokens from Token recognizers, and recognizers could
   accept or reject tokens arbitrarily. This makes something like "all unicode 

@@ -124,7 +124,7 @@ impl<T: Token> Parser<T> {
         for token in tokens.clone() {
             let mut next_layer = vec![];
 
-            for link in gss.last().ok_or(ParseError("gss initialized".to_string()))? {
+            for link in gss.last().ok_or(ParseError("gss uninitialized".to_string()))? {
                 next_layer.extend(
                     GSSNode::advance_token(Rc::clone(&link.node), &token, &self)?.into_iter()
                         .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(&link)]}))
@@ -136,12 +136,22 @@ impl<T: Token> Parser<T> {
 
             gss.push(next_layer);
         }
+        
+        /* Backtracks from the final node to the first. Final and first are removed, since they are the root rule. 
+         * All other nodes correspond to tokens. */
+        let backtrace = Parser::<T>::get_backtrace(&gss)?;
 
+        /* Uses the backtrace to determine the hierarchy of rules and tokens, i.e.
+         * the final syntax tree */
+        Parser::<T>::backtrace_to_tree(&backtrace, &tokens)
+    }
+
+    fn get_backtrace<'a>(gss: &'a Vec<Vec<Rc<GSSLink<T>>>>) -> Result<Vec<Rc<GSSNode<'a, T>>>, ParseError> {
         let final_links = gss.get(gss.len() - 1)
-            .ok_or(ParseError("gss initialized".to_string()))?
-            .iter()
-            .filter(|link| matches!(link.node.parent_data, GSSParentData::Done))
-            .collect::<Vec<_>>();
+        .ok_or(ParseError("gss initialized".to_string()))?
+        .iter()
+        .filter(|link| matches!(link.node.parent_data, GSSParentData::Done))
+        .collect::<Vec<_>>();
 
         let final_link = match final_links.len() {
             0 => Err(ParseError("Unsuccessful Parse...".to_string())),
@@ -164,8 +174,11 @@ impl<T: Token> Parser<T> {
 
         let backtrace = backtrace[1..backtrace.len()-1].to_vec();  // Drop ends, they are the root rule. 
 
-        /* Track the positions of rules and tokens */
-        
+        Ok(backtrace)
+    }
+
+    fn backtrace_to_tree<'a>(backtrace: &'a Vec<Rc<GSSNode<'a, T>>>, tokens: &Vec<T>) -> Result<SyntaxTree<T>, ParseError> {
+        /* Track the positions of rules and tokens */  
         let mut positions = HashMap::new(); // token id, or id of leftmost token under a rule 
         for (i, node) in backtrace.into_iter().enumerate() {
             positions.insert(HashableRc::new(Rc::clone(&node)), i);
@@ -184,6 +197,8 @@ impl<T: Token> Parser<T> {
                 curr_node = &ancestor.parent;
             }
         }
+
+        // We have all the nodes, but they are not linked up yet.
 
         let mut unlinked_trees = positions.iter()
             .map(|(node, &pos)| {
@@ -204,6 +219,8 @@ impl<T: Token> Parser<T> {
 
         let mut root_tree = None;
             
+        /* Link up the trees */
+         
         for (tree, node, _) in unlinked_trees {
 
             let mut curr_node = node;
@@ -234,7 +251,6 @@ impl<T: Token> Parser<T> {
             root_tree.ok_or(ParseError("No root found at end of parsing".to_string()))?
         ))
     }
-
 }
 
 impl Parser<CharToken> {

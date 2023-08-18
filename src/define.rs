@@ -354,6 +354,7 @@ fn literal_to_combination<T: Token>(literal: String) -> Result<RuleExpression<T>
         None => Err(DefinitionError("Token type does not support converting string literals".to_owned())),
     }
 }
+
 fn validate_parser<T: Token>(parser: Parser<T>) -> Result<Parser<T>, DefinitionError> {
     // TODO!
 
