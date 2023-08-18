@@ -5,10 +5,10 @@ fn main() {
         MultDivExpr : AtomicExpr (("*" | "/") AtomicExpr)* ;
         AtomicExpr : OptWhitespace (Literal | "(" PlusMinusExpr ")" ) OptWhitespace;
         Literal : "a" | "b" | "c" | "d" ;
-        OptWhitespace : " "* ;
+        OptWhitespace : (" " | "\t" | "\n" | "\r\n" | "\'" | "\"" )* ; # Yeah the quotes are weird is kinda weird
     "#.to_owned()).expect("Not an error?");
     
-    let tree = parser.parse_string("   ( a + b)*( c +   a  *  (  d )+ c  )".to_owned(), "PlusMinusExpr")
+    let tree = parser.parse_string("   ( a + b)*( c +  a  * \n\n\n\t\t '''\"\"\" (  d )+ c  )".to_owned(), "PlusMinusExpr")
         .expect("Good parse");
     println!("{}", tree);
 

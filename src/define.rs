@@ -160,7 +160,7 @@ fn string_to_token(mut string: String) -> Result<DefinitionToken, DefinitionErro
             => {
                 string.remove(string.len() - 1);
                 string.remove(0);
-                Ok(DefinitionToken::StringLiteral(deliteralize(string)))
+                Ok(DefinitionToken::StringLiteral(deliteralize(string)?))
             }
         _ if string.chars().all(|ch| is_identifier_char(ch))
             => Ok(DefinitionToken::Identifier(string)),
@@ -173,10 +173,42 @@ fn is_identifier_char(char: char) -> bool {
 }
 
 /* Given a string that may have escape sequences, substitutes those escape sequences with 
- * the characters they represent. */
-fn deliteralize(string: String) -> String {
-    // TODO!
-    return string;
+ * the characters they represent. 
+ * 
+ * Currently supports all single character escape sequences supported by Rust, 
+ * i.e. those that can be typed written as a backslash followed by a single character.
+ * There are other escape sequences that could be supported, but I would need to
+ * rewrite tokenize() above to be smarter. */
+fn deliteralize(string: String) -> Result<String, DefinitionError> {
+    let mut result = String::new();
+
+    let mut slash_mode = false;
+    for ch in string.chars() {
+        if slash_mode {
+            match ch {
+                '\\' => result.push('\\'),
+                'n' => result.push('\n'),
+                'r' => result.push('\r'),
+                't' => result.push('\t'),
+                '0' => result.push('\0'),
+                '\'' => result.push('\''),
+                '"' => result.push('"'),
+                _ => return Err(DefinitionError("Bad escape sequence".to_owned())),
+            }
+
+            slash_mode = false;
+        }
+        else {
+            if ch == '\\' {
+                slash_mode = true;
+            }
+            else {
+                result.push(ch);
+            }
+        }
+    }
+
+    return Ok(result);
 }
 
 fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpression<T>), DefinitionError> {
