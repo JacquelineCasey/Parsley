@@ -178,6 +178,9 @@ impl<T: Token> Parser<T> {
     }
 
     fn backtrace_to_tree<'a>(backtrace: &'a Vec<Rc<GSSNode<'a, T>>>, tokens: &Vec<T>) -> Result<SyntaxTree<T>, ParseError> {
+        /* Theory: this can be way way way simplified. I think I got really confused
+         * before I decided to use HashableRc */
+
         /* Track the positions of rules and tokens */  
         let mut positions = HashMap::new(); // token id, or id of leftmost token under a rule 
         for (i, node) in backtrace.into_iter().enumerate() {
