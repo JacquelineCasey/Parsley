@@ -178,11 +178,10 @@ impl<T: Token> Parser<T> {
     }
 
     fn backtrace_to_tree(backtrace: Vec<Rc<GSSNode<'_, T>>>) -> Result<SyntaxTree<T>, ParseError> {
-        /* Theory: this can be way way way simplified. I think I got really confused
-         * before I decided to use HashableRc. Keep only the following loop. If you
-         * can get rid of the intermediate tree, great, but I kinda doubt thats possible. 
-         * 
-         * The key: A singular hashtable, from HashableRc::<GSSNode> to Rc<RefCell<IntermediateSyntaxTree>> */
+        /* Examine each token in the backtrace, and ascend through its GSSNode ancestors to
+         * identify which rules the token is under. Note that this method means that a rule
+         * that parses no tokens is not included at all in the final tree, which might
+         * be confusing but should be survivable. */
 
         let mut subtrees: HashMap<HashableRc::<GSSNode<T>>, Rc<RefCell<IntermediateSyntaxTree<T>>>> = HashMap::new();
         let mut root: Option<Rc<RefCell<IntermediateSyntaxTree<T>>>> = None;
@@ -227,7 +226,8 @@ impl<T: Token> Parser<T> {
             }
         }
 
-        /* Final conversion to tree. */
+        /* Final conversion to SyntaxTree. The intermediate tree had to use Rc<RefCell<_>>
+         * so that the trees could be shared in the HashMap as well. */
         Ok(intermediate_to_final(
             root.ok_or(ParseError("No root found at end of parsing".to_string()))?
         ))
