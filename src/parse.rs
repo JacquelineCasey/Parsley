@@ -460,7 +460,7 @@ mod tests {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
             Color: RGB | Hex ;
             RGB: "Color"  " "  "(" Num " " Num " " Num ")" ;
-            Hex: "#" HexNum ;
+            Hex: "#" HexNum HexNum HexNum HexNum HexNum HexNum ;
             Num: "0" | "1" | "2" | "3" ; # Proof of concept
             HexNum: Num | "A" | "B" | "C" ; # Proof of concept
         "##.to_string()).expect("Parser definition ok");
@@ -468,8 +468,6 @@ mod tests {
         let tree = parser
             .parse_string("Color (1 3 0)".to_string(), "Color")
             .expect("No error");
-
-        println!("{}", tree);
 
         assert_eq!(tree.to_string(), indoc! {"
         Syntax Tree {
@@ -493,6 +491,37 @@ mod tests {
                     token ())
         }"}
         );
+
+        let tree = parser
+            .parse_string("#ABC012".to_string(), "Color")
+            .expect("No error");
+
+        println!("{}", tree);
+
+        assert_eq!(tree.to_string(), indoc! {"
+            Syntax Tree {
+                Color
+                    Hex
+                        token (#)
+                        HexNum
+                            token (A)
+                        HexNum
+                            token (B)
+                        HexNum
+                            token (C)
+                        HexNum
+                            Num
+                                token (0)
+                        HexNum
+                            Num
+                                token (1)
+                        HexNum
+                            Num
+                                token (2)
+            }"}
+            );
+
+
     }
 
     #[test]
@@ -501,6 +530,9 @@ mod tests {
             Num : "1" | "2" | "3" | "4" ; # Incomplete ofc
             AddExpr: Num ("+" AddExpr)? ;
         "##.to_string()).expect("Parser definition ok");
+
+        // Modifiers bind tightly, so this should fial
+        parser.parse_string("12".to_string(), "AddExpr").expect_err("Should fail");
 
         let tree = parser
             .parse_string("1+2+3+4".to_string(), "AddExpr")
