@@ -15,6 +15,9 @@
   if surrounding Optional or Many operators consume no tokens. I guess this is 
   ultimately fine, afterall the alternative seems to be letting certain recursive 
   formulae have infinite parse trees: " Expr : Term Expr? "
+  - We could kinda solve this though if we examined the backtrace in a more principled
+    way, examining every node insteaed of just ancestors of terminals. Maybe we should
+    actually do that. Also, I don't the example I cited was actually problematic.
 
 PS: Here is a C grammar for when we really want to stress test:
 - https://cs.wmich.edu/~gupta/teaching/cs4850/sumII06/The%20syntax%20of%20C%20in%20Backus-Naur%20form.htm

@@ -143,7 +143,7 @@ impl<T: Token> Parser<T> {
 
         /* Uses the backtrace to determine the hierarchy of rules and tokens, i.e.
          * the final syntax tree */
-        Parser::<T>::backtrace_to_tree(&backtrace, &tokens)
+        Parser::<T>::backtrace_to_tree(backtrace)
     }
 
     fn get_backtrace<'a>(gss: &'a Vec<Vec<Rc<GSSLink<T>>>>) -> Result<Vec<Rc<GSSNode<'a, T>>>, ParseError> {
@@ -177,81 +177,59 @@ impl<T: Token> Parser<T> {
         Ok(backtrace)
     }
 
-    fn backtrace_to_tree<'a>(backtrace: &'a Vec<Rc<GSSNode<'a, T>>>, tokens: &Vec<T>) -> Result<SyntaxTree<T>, ParseError> {
+    fn backtrace_to_tree(backtrace: Vec<Rc<GSSNode<'_, T>>>) -> Result<SyntaxTree<T>, ParseError> {
         /* Theory: this can be way way way simplified. I think I got really confused
-         * before I decided to use HashableRc */
+         * before I decided to use HashableRc. Keep only the following loop. If you
+         * can get rid of the intermediate tree, great, but I kinda doubt thats possible. 
+         * 
+         * The key: A singular hashtable, from HashableRc::<GSSNode> to Rc<RefCell<IntermediateSyntaxTree>> */
 
-        /* Track the positions of rules and tokens */  
-        let mut positions = HashMap::new(); // token id, or id of leftmost token under a rule 
-        for (i, node) in backtrace.into_iter().enumerate() {
-            positions.insert(HashableRc::new(Rc::clone(&node)), i);
+        let mut subtrees: HashMap<HashableRc::<GSSNode<T>>, Rc<RefCell<IntermediateSyntaxTree<T>>>> = HashMap::new();
+        let mut root: Option<Rc<RefCell<IntermediateSyntaxTree<T>>>> = None;
 
-            let mut curr_node = &node.parent;
-            while let Some(ancestor) = curr_node {
-                if let RuleExpression::RuleName(_) = ancestor.expr {
-                    if positions.contains_key(&HashableRc::new(Rc::clone(ancestor))) {
-                        break;
-                    }
-                    else {
-                        positions.insert(HashableRc::new(Rc::clone(ancestor)), i);
-                    }
-                }
-                
-                curr_node = &ancestor.parent;
-            }
-        }
+        for node in backtrace.into_iter() {
+            if let RuleExpression::Terminal(tok) = node.expr {
+                let mut curr_node = node;
+                let mut curr_subtree = Rc::new(RefCell::new(IntermediateSyntaxTree::TokenNode(tok.clone())));
 
-        // We have all the nodes, but they are not linked up yet.
+                while let Some(parent) = &curr_node.parent {
+                    if let RuleExpression::RuleName(name) = parent.expr {
+                        let parent_unprocessed = !subtrees.contains_key(&HashableRc::new(Rc::clone(parent)));
 
-        let mut unlinked_trees = positions.iter()
-            .map(|(node, &pos)| {
-                let tree = match node.get_cloned().expr {
-                    RuleExpression::Terminal(_) => IntermediateSyntaxTree::TokenNode(tokens[pos].clone()),
-                    RuleExpression::RuleName(name) => IntermediateSyntaxTree::RuleNode {rule_name: name.clone(), subexpressions: vec![]},
-                    _ => panic!("Expressions known to be either Terminal or RuleName")
-                };
-                (Rc::new(RefCell::new(tree)), node.get_cloned(), pos)
-            })
-            .collect::<Vec<(Rc<RefCell<IntermediateSyntaxTree<T>>>, Rc<GSSNode<T>>, usize)>>();
-        
-        unlinked_trees.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
-
-        let tree_lookup = unlinked_trees.clone().into_iter()
-            .map(|(tree, node, _)| (HashableRc::new(Rc::clone(&node)), tree))
-            .collect::<HashMap<_, _>>();
-
-        let mut root_tree = None;
-            
-        /* Link up the trees */
-         
-        for (tree, node, _) in unlinked_trees {
-
-            let mut curr_node = node;
-            while let Some(ancestor) = &curr_node.parent {
-                if let RuleExpression::RuleName(_) = ancestor.expr {
-                    let parent_tree = Rc::clone(&tree_lookup[&HashableRc::new(Rc::clone(ancestor))]);
-                    
-                    match &mut *parent_tree.borrow_mut() {
-                        IntermediateSyntaxTree::RuleNode {rule_name: _, subexpressions} => {
-                            subexpressions.push(Rc::clone(&tree));
+                        if parent_unprocessed {
+                            subtrees.insert(HashableRc::new(Rc::clone(parent)), Rc::new(RefCell::new(IntermediateSyntaxTree::RuleNode { rule_name: name.clone(), subexpressions: vec![] })));
                         }
-                        IntermediateSyntaxTree::TokenNode(_) => panic!("Known to be RuleNode")
+ 
+                        let parent_tree = subtrees.get(&HashableRc::new(Rc::clone(parent))).expect("Known to contain node");
+                        if let IntermediateSyntaxTree::RuleNode { rule_name: _, subexpressions } = &mut *(parent_tree.borrow_mut()) {  // I hate this &mut *(...) thing.
+                            subexpressions.push(curr_subtree);
+                        }
+                        else {
+                            panic!("Known to be RuleNode variant");
+                        }
+
+                        curr_subtree = Rc::clone(parent_tree);
+
+                        if !parent_unprocessed {
+                            break;
+                        }
+                    } 
+
+                    curr_node = Rc::clone(&curr_node.parent.clone().expect("Known to be Some ()"));
+
+                    if curr_node.parent == None {
+                        root = Some(Rc::clone(subtrees.get(&HashableRc::new(Rc::clone(&curr_node))).expect("Known to contain node")));
                     }
-
-                    break;
                 }
-
-                curr_node = curr_node.parent.clone().expect("Known to be Some()");
             }
-
-            if let None = curr_node.parent { 
-                root_tree = Some(tree_lookup[&HashableRc::new(curr_node)].clone());
+            else {
+                return Err(ParseError("Non Terminal in backtrace".to_owned()));
             }
         }
 
         /* Final conversion to tree. */
         Ok(intermediate_to_final(
-            root_tree.ok_or(ParseError("No root found at end of parsing".to_string()))?
+            root.ok_or(ParseError("No root found at end of parsing".to_string()))?
         ))
     }
 }
