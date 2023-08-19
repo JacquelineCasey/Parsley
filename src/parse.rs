@@ -145,7 +145,39 @@ impl<T: Token> Parser<T> {
          * the final syntax tree */
         Parser::<T>::backtrace_to_tree(backtrace)
     }
+}
 
+impl Parser<CharToken> {
+    pub fn parse_string(&self, input: String, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
+        let tokens = CharToken::token_sequence_from_literal(&input)
+            .expect("CharToken returns Some(...)");
+        self.parse_tokens(tokens, start_rule)
+    }
+}
+
+
+/* Private Implementation */
+
+#[derive(Clone, Debug)]
+enum IntermediateSyntaxTree<T: Token> { // Vec contains Rc's, to be removed later.
+    RuleNode {rule_name: String, subexpressions: Vec<Rc<RefCell<IntermediateSyntaxTree<T>>>>},
+    TokenNode (T)
+}
+
+fn intermediate_to_final<T: Token>(root: Rc<RefCell<IntermediateSyntaxTree<T>>>) -> SyntaxTree<T> {
+    match root.borrow().clone() {
+        IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
+            SyntaxTree::RuleNode {
+                rule_name, 
+                subexpressions: subexpressions.into_iter()
+                    .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
+                    .collect()
+            },
+        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token),
+    }
+}
+
+impl<T: Token> Parser<T> {
     fn get_backtrace<'a>(gss: &'a Vec<Vec<Rc<GSSLink<T>>>>) -> Result<Vec<Rc<GSSNode<'a, T>>>, ParseError> {
         let final_links = gss.get(gss.len() - 1)
         .ok_or(ParseError("gss initialized".to_string()))?
@@ -231,36 +263,6 @@ impl<T: Token> Parser<T> {
         Ok(intermediate_to_final(
             root.ok_or(ParseError("No root found at end of parsing".to_string()))?
         ))
-    }
-}
-
-impl Parser<CharToken> {
-    pub fn parse_string(&self, input: String, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
-        let tokens = CharToken::token_sequence_from_literal(&input)
-            .expect("CharToken returns Some(...)");
-        self.parse_tokens(tokens, start_rule)
-    }
-}
-
-
-/* Private Implementation */
-
-#[derive(Clone, Debug)]
-enum IntermediateSyntaxTree<T: Token> { // Vec contains Rc's, to be removed later.
-    RuleNode {rule_name: String, subexpressions: Vec<Rc<RefCell<IntermediateSyntaxTree<T>>>>},
-    TokenNode (T)
-}
-
-fn intermediate_to_final<T: Token>(root: Rc<RefCell<IntermediateSyntaxTree<T>>>) -> SyntaxTree<T> {
-    match root.borrow().clone() {
-        IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
-            SyntaxTree::RuleNode {
-                rule_name, 
-                subexpressions: subexpressions.into_iter()
-                    .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
-                    .collect()
-            },
-        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token),
     }
 }
 
