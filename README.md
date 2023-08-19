@@ -1,6 +1,14 @@
 
 Parsers are a perennial interest of mine, so I wrote one!
 
+---
+
+Look, realistically, I can't be trusted to keep the below documentation up to date.
+However, I can be trusted to keep writing tests as I add and tweak features, so
+consider poking around in the code to see how the tests work.
+
+---
+
 Feed in the definition of a parser using the "Parsley Definition Language", which
 I made to look mostly like Backus-Naur form with some conveniences from Regex.
 
