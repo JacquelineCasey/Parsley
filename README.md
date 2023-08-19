@@ -72,12 +72,12 @@ However, for most sane formulas, it seems to run pretty fast.
 
 One more thing - parsers are defined generically with respect to a token type. For
 now, you should probably really only use CharToken, though I suppose any token which
-overrides the defaulted `token_sequence_from_literal()` trait function, which defines
+overrides the defaulted `token_sequence_from_literal()` trait function will work; the function defines
 how string literals in the definition language (pre-escaped) are translated into
 tokens. In the future I will likely add another way to match tokens beyond string
 literals, which will allow parsers to work on inputs that are not strings.
 Even further ahead, I might change how users define tokens to allow for seperate
-token recognizers and actualy tokens, which might allow the algorithm to run arbitrary code
+token recognizers vs actual tokens, which might allow the algorithm to run arbitrary code
 when it tries to recognize a token. This could prevent pain points around "recognize
 any unicode character" rules, which would otherwise be truly painful to write. For
 now thought, the parser definition system is definitely sufficient for parsing ASCII, 
@@ -104,8 +104,9 @@ whitespace, then the final syntax tree will not contain OptWhitespace at all.
 It is intended for users to write code that transforms this concrete syntax tree
 into an abstract syntax tree. This may require some careful consideration in cases
 where subrules can parse no tokens, and so may or may not be in the final tree. Additionally,
-if a subrule or a group its contained in was quantified, it may appear 0 or many times
+if a subrule or a group it is contained in was quantified, it may appear 0 or many times
 in the final tree. The point of the parser is to organize the tokens in a hierarchy,
 anything more would require me to make significant assumptions on the end user's
 use case.
 
+Happy parsing!
