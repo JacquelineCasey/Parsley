@@ -87,7 +87,7 @@ pub trait Token : Sized + Clone + std::fmt::Debug + Eq {
 pub struct CharToken {
     /* Unlike most tokens, a single field is sufficient, as all token_types have
      * a single possible value (the character). */
-    token_type: String,  // String for annoying ownership reasons. Will validate that its a single character.
+    pub token_type: String,  // String for annoying ownership reasons. Will validate that its a single character.
 }
 
 impl Token for CharToken {
