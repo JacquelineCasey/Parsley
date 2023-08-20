@@ -26,10 +26,10 @@ pub fn define_parser<T: Token>(definition: String) -> Result<Parser<T>, Definiti
 
     let rules_map = rule_token_slices
         .dropping_back(1)
-        .map(|slice| parse_rule(slice))
-        .collect::<Result<HashMap<String, RuleExpression<T>>, DefinitionError>>()?;
+        .map(|slice| parse_rule::<T>(slice))
+        .collect::<Result<HashMap<String, RuleExpression>, DefinitionError>>()?;
 
-    let parser = Parser::<T> {rules: rules_map};
+    let parser = Parser::<T> {rules: rules_map, phantom: std::marker::PhantomData};
         
     validate_parser(parser)
 }
@@ -68,14 +68,14 @@ enum Operator {
 /* Describes the rules for what matches a specific rule. The name of the associated
  * rule is stored externally (i.e. as a hash map key) */
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuleExpression<T: Token> {
-    Terminal (T),
+pub enum RuleExpression {
+    Terminal (String),  // This string is passed into T::matches
     RuleName (String),
-    Concatenation (Vec<RuleExpression<T>>),
-    Alternatives (Vec<RuleExpression<T>>),
-    Optional (Box<RuleExpression<T>>),
-    OneOrMore (Box<RuleExpression<T>>),
-    Many (Box<RuleExpression<T>>)
+    Concatenation (Vec<RuleExpression>),
+    Alternatives (Vec<RuleExpression>),
+    Optional (Box<RuleExpression>),
+    OneOrMore (Box<RuleExpression>),
+    Many (Box<RuleExpression>)
 }
 
 /* Converts a string into tokens. Whitespace is removed, but considered in order
@@ -211,7 +211,7 @@ fn deliteralize(string: String) -> Result<String, DefinitionError> {
     return Ok(result);
 }
 
-fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpression<T>), DefinitionError> {
+fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpression), DefinitionError> {
     let tokens = tokens.to_vec();
 
     if tokens.get(1).ok_or(DefinitionError("Not enough tokens in rule".to_owned()))? != &DefinitionToken::Operator(Operator::Colon) {
@@ -223,10 +223,10 @@ fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpre
         _ => Err(DefinitionError("First token of rule must be an identifier. Syntax: <Rule> : <Rule Expression> ;".to_owned()))?
     };
 
-    return Ok((rule_name, parse_expression(tokens[2..].to_vec())?));
+    return Ok((rule_name, parse_expression::<T>(tokens[2..].to_vec())?));
 }
 
-fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpression<T>, DefinitionError> {
+fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, DefinitionError> {
     if tokens.len() == 0 {
         return Err(DefinitionError("Encountered empty subexpression".to_string()));
     }
@@ -270,7 +270,7 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
     }
 
     if min_precedence_indices.is_empty() {
-        return parse_expression(tokens[1..tokens.len()-1].to_vec());
+        return parse_expression::<T>(tokens[1..tokens.len()-1].to_vec());
     }
 
     match tokens[min_precedence_indices[0]] {
@@ -281,8 +281,8 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
 
             let sub_expressions = delimiters.clone()
                 .zip(delimiters.skip(1))
-                .map(|(left, right)| parse_expression(tokens[((left+1) as usize)..(right as usize)].to_vec()))
-                .collect::<Result<Vec<RuleExpression<T>>, DefinitionError>>()?;
+                .map(|(left, right)| parse_expression::<T>(tokens[((left+1) as usize)..(right as usize)].to_vec()))
+                .collect::<Result<Vec<RuleExpression>, DefinitionError>>()?;
             Ok(RuleExpression::Alternatives(sub_expressions))
         }
 
@@ -303,15 +303,17 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
                 else if tokens[i] == DefinitionToken::RightParenthesis {
                     paren_nesting -= 1;
                     if paren_nesting == 0 {
-                        sub_expressions.push(parse_expression(tokens[curr_left_paren + 1..i].to_vec())?);
+                        sub_expressions.push(parse_expression::<T>(tokens[curr_left_paren + 1..i].to_vec())?);
                     }
                 }
                 else if paren_nesting == 0 {
                     match &tokens[i] {
+                        DefinitionToken::Identifier(rule_name) if rule_name.chars().nth(0).expect("exists") == '_'
+                            => sub_expressions.push(RuleExpression::Terminal(rule_name[1..].to_string())),
                         DefinitionToken::Identifier(rule_name)
                             => sub_expressions.push(RuleExpression::RuleName(rule_name.clone())),
                         DefinitionToken::StringLiteral(literal)
-                            => sub_expressions.push(literal_to_combination(literal.clone())?),
+                            => sub_expressions.push(literal_to_combination::<T>(literal.clone())?),
                         DefinitionToken::Operator(Operator::Plus) => {
                             let len = sub_expressions.len();  // appease borrow checker
                             sub_expressions[len - 1] = RuleExpression::OneOrMore(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
@@ -344,8 +346,8 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
     }
 }
 
-fn literal_to_combination<T: Token>(literal: String) -> Result<RuleExpression<T>, DefinitionError> {
-    match T::token_sequence_from_literal(&literal) {
+fn literal_to_combination<T: Token>(literal: String) -> Result<RuleExpression, DefinitionError> {
+    match T::type_sequence_from_literal(&literal) {
         Some(sequence) if sequence.len() == 0 => Err(DefinitionError("Matching no tokens is forbidden".to_string())),
         Some(sequence) if sequence.len() == 1 => Ok(RuleExpression::Terminal(sequence[0].clone())),
         Some(sequence) if sequence.len() > 1
@@ -437,15 +439,15 @@ mod tests {
             parse_rule::<crate::CharToken>(&tokenize(r#"Coordinate: ("A" | "B" | "C") " " ("1" | "2" | "3")"#.to_string()).unwrap()),
             Ok(("Coordinate".to_string(), Concatenation(vec![
                 Alternatives(vec![
-                    literal_to_combination("A".to_string()).unwrap(), // Actually not combinations btw
-                    literal_to_combination("B".to_string()).unwrap(),
-                    literal_to_combination("C".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("A".to_string()).unwrap(), // Actually not combinations btw
+                    literal_to_combination::<crate::CharToken>("B".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("C".to_string()).unwrap(),
                 ]),
-                literal_to_combination(" ".to_string()).unwrap(),
+                literal_to_combination::<crate::CharToken>(" ".to_string()).unwrap(),
                 Alternatives(vec![
-                    literal_to_combination("1".to_string()).unwrap(),
-                    literal_to_combination("2".to_string()).unwrap(),
-                    literal_to_combination("3".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("1".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("2".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("3".to_string()).unwrap(),
                 ]),
             ])))
         );

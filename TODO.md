@@ -7,10 +7,6 @@
 - Handle ambiguous parse are failed parse. Ideally a failed parse should identify
   where the parse goes wrong, i.e. how far along parsing stopped.
 
-- Maybe we should seperate Tokens from Token recognizers, and recognizers could
-  accept or reject tokens arbitrarily. This makes something like "all unicode 
-  codepoints except '\' and '"' feasible to write and run. 
-
 - Nota Bene: With current algorithm, rules can be skipped in final parse tree
   if surrounding Optional or Many operators consume no tokens. I guess this is 
   ultimately fine, afterall the alternative seems to be letting certain recursive 

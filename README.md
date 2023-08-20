@@ -78,7 +78,23 @@ formula, so long as it continues to see things that match "Rule".
 
 However, for most sane formulas, it seems to run pretty fast.
 
-One more thing - parsers are defined generically with respect to a token type. For
+One more thing - parsers are defined generically with respect to a token type. Lexerless
+parsing is possible if you use the provided `CharToken` type. This allows you to match
+strings of tokens using string literals in the definition language.
+
+If you want to use your own token type, you need to implement the `Token` trait.
+The main feature is the function `matches` which takes a string token_type and a
+token, and declares whether or not the token matches the token_type. Then, in the
+parser definition, you can write the token type prefixed with an underscore in order
+to match any token that passes the check. For example, if you write `matches()` so that
+"any_lowercase_ascii" accepts a string token if it is all lowercase ascii, then you
+have access to the special Terminal `_any_lowercase_ascii` that has this behavior.
+Note that this is not treated as a Rule in the Syntax Tree, it is directly replaced
+by the token it matches.
+
+
+
+For
 now, you should probably really only use CharToken, though I suppose any token which
 overrides the defaulted `token_sequence_from_literal()` trait function will work; the function defines
 how string literals in the definition language (pre-escaped) are translated into
