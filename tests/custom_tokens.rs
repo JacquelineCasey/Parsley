@@ -5,11 +5,6 @@ use parsley::Token;
 struct CustomToken (String);
 
 impl Token for CustomToken {
-    fn get_contents(&self) -> &str {
-        return &self.0;
-    }
-
-
     fn matches(token_type: &str, token: &Self) -> Result<bool, parsley::ParseError> {
         match token_type {
             "NonKeyword" => 
@@ -21,6 +16,12 @@ impl Token for CustomToken {
             _ => 
                 Err(parsley::ParseError("Bad token type".to_string()))
         }
+    }
+}
+
+impl std::fmt::Display for CustomToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 

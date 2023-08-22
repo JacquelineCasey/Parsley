@@ -21,7 +21,7 @@ pub enum SyntaxTree<T: Token> {
     TokenNode (T)
 }
 
-impl<T: Token> std::fmt::Display for SyntaxTree<T> {
+impl<T: Token + std::fmt::Display> std::fmt::Display for SyntaxTree<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Syntax Tree {")?;
         self.helper_fmt(1, f)?;
@@ -29,7 +29,7 @@ impl<T: Token> std::fmt::Display for SyntaxTree<T> {
     }
 }
 
-impl<T: Token> SyntaxTree<T> {
+impl<T: Token + std::fmt::Display> SyntaxTree<T> {
     fn helper_fmt(&self, level: usize, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("\n")?;
         f.write_str(&std::iter::repeat(' ').take(level * 4).collect::<String>())?;
@@ -43,7 +43,7 @@ impl<T: Token> SyntaxTree<T> {
                 Ok(())
             },
             SyntaxTree::TokenNode(token) => {
-                f.write_str(&format!("token ({})", token.get_contents()))
+                f.write_str(&format!("token ({})", token))
             }
         }
 
@@ -64,9 +64,6 @@ pub struct ParseError (pub String);
  * Tokens need not track their own location in the source file, that will eventually
  * be done by the parser. */
 pub trait Token : Sized + std::fmt::Debug {
-    /* Returns the matched contents of a token, e.g. 'foo' */
-    fn get_contents(&self) -> &str;
-
     /* If the parser definition contains a rule with a name starting with an underscore,
      * e.g. "_ascii_lower", then instead of acting as a normal rule, it will act
      * as a special rule that dispatches to this function.
@@ -100,10 +97,6 @@ pub struct CharToken {
 }
 
 impl Token for CharToken {
-    fn get_contents(&self) -> &str {
-        &self.token_type
-    }
-
     fn type_sequence_from_literal(literal: &str) -> Option<Vec<String>> {
         return Some(literal.chars().map(|c| c.to_string()).collect())
     }
@@ -111,6 +104,12 @@ impl Token for CharToken {
     /* Simplest possible match behavior */
     fn matches(token_type: &str, token: &Self) -> Result<bool, ParseError> {
         Ok(token_type == token.token_type)
+    }
+}
+
+impl std::fmt::Display for CharToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.token_type)
     }
 }
 

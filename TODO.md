@@ -6,6 +6,8 @@
 - Merge parser processes that reach the same state, or maybe just declare an ambiguous parse?
 - Handle ambiguous parse are failed parse. Ideally a failed parse should identify
   where the parse goes wrong, i.e. how far along parsing stopped.
+- Calls to `matches()` could be memoized, though it is unclear if this would be
+  worth it for most users.
 
 - Nota Bene: With current algorithm, rules can be skipped in final parse tree
   if surrounding Optional or Many operators consume no tokens. I guess this is 
