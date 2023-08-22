@@ -409,7 +409,7 @@ fn resolve_to_terminals<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<
         RuleExpression::Terminal(_) => Ok(vec![node]),
         RuleExpression::RuleName(name) => {
             resolve_to_terminals(Rc::new(GSSNode {
-                expr: &parser.rules[name], 
+                expr: parser.rules.get(name).ok_or(ParseError(format!("Cannot recognize rule {}", name)))?, 
                 parent: Some(node), 
                 parent_data: GSSParentData::NoData
             }), parser)
