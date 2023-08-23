@@ -74,7 +74,7 @@ pub trait Token : Sized + std::fmt::Debug {
      * It is permitted to return ParseError if something goes wrong. For example, 
      * receiving an unknown token_type. 
      * 
-     * Note: if you also override token_sequence_from_literal, then you define which
+     * Note: if you also override type_sequence_from_literal, then you define which
      * token_types are fed into this function. */
     fn matches(token_type: &str, token: &Self) -> Result<bool, ParseError>;
 
