@@ -32,10 +32,10 @@ impl<T: Token + std::fmt::Display> std::fmt::Display for SyntaxTree<T> {
 impl<T: Token + std::fmt::Display> SyntaxTree<T> {
     fn helper_fmt(&self, level: usize, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("\n")?;
-        f.write_str(&std::iter::repeat(' ').take(level * 4).collect::<String>())?;
+        f.write_str(&" ".repeat(level * 4))?;
         match self {
             SyntaxTree::RuleNode {rule_name, subexpressions} => {
-                f.write_str(&rule_name)?;
+                f.write_str(rule_name)?;
                 for expr in subexpressions {
                     expr.helper_fmt(level + 1, f)?;
                     // f.write_str("\n")?
@@ -43,7 +43,7 @@ impl<T: Token + std::fmt::Display> SyntaxTree<T> {
                 Ok(())
             },
             SyntaxTree::TokenNode(token) => {
-                f.write_str(&format!("token ({})", token))
+                f.write_str(&format!("token ({token})"))
             }
         }
 
@@ -125,18 +125,18 @@ impl<T: Token> Parser<T> {
          * When the algorithm is finished, the last layer (gss[tokens.len()])
          * holds nodes representing parser processes that have consumed all tokens. */
         let mut gss: Vec<Vec<Rc<GSSLink>>> = vec![
-            resolve_to_terminals(Rc::clone(&root_link.node), &self)?.into_iter()
-                .map(|node| Rc::new(GSSLink {node: node, prev: vec![Rc::clone(&root_link)]}))
+            resolve_to_terminals(Rc::clone(&root_link.node), self)?.into_iter()
+                .map(|node| Rc::new(GSSLink {node, prev: vec![Rc::clone(&root_link)]}))
                 .collect()
         ];
 
-        for token in tokens.iter() {
+        for token in &tokens {
             let mut next_layer = vec![];
 
             for link in gss.last().ok_or(ParseError("gss uninitialized".to_string()))? {
                 next_layer.extend(
-                    advance_token(Rc::clone(&link.node), token, &self)?.into_iter()
-                        .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(&link)]}))
+                    advance_token(&link.node, token, self)?.into_iter()
+                        .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(link)]}))
                         .collect::<Vec<_>>()
                 );
             }
@@ -157,7 +157,7 @@ impl<T: Token> Parser<T> {
 }
 
 impl Parser<CharToken> {
-    pub fn parse_string(&self, input: String, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
+    pub fn parse_string(&self, input: &str, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
         let tokens = input.chars()
             .map(|ch| CharToken { token_type: ch.to_string() })
             .collect();
@@ -188,8 +188,8 @@ fn intermediate_to_final<T: Token>(root: Rc<RefCell<IntermediateSyntaxTree<T>>>)
 }
 
 impl<T: Token> Parser<T> {
-    fn get_backtrace<'a>(gss: &'a Vec<Vec<Rc<GSSLink>>>) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
-        let final_links = gss.get(gss.len() - 1)
+    fn get_backtrace<'a>(gss: &'a [Vec<Rc<GSSLink>>]) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
+        let final_links = gss.last()
         .ok_or(ParseError("gss initialized".to_string()))?
         .iter()
         .filter(|link| matches!(link.node.parent_data, GSSParentData::Done))
@@ -262,7 +262,7 @@ impl<T: Token> Parser<T> {
 
                     curr_node = Rc::clone(&curr_node.parent.clone().expect("Known to be Some ()"));
 
-                    if curr_node.parent == None {
+                    if curr_node.parent.is_none() {
                         root = Some(Rc::clone(subtrees.get(&HashableRc::new(Rc::clone(&curr_node))).expect("Known to contain node")));
                     }
                 }
@@ -325,15 +325,15 @@ impl std::fmt::Debug for GSSNode<'_> {
 
 /* Returns a set of all next terminal expressions to parse, modelling the next
     * step after consuming a token in a given state. */
-fn advance_token<'a, T: Token>(node: Rc<GSSNode<'a>>, token: &T, parser: &'a Parser<T>) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
+fn advance_token<'a, T: Token>(node: &Rc<GSSNode<'a>>, token: &T, parser: &'a Parser<T>) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
     if let GSSParentData::Done = node.parent_data {
         Ok(vec![])
     }
     else {
         match node.expr {
-            RuleExpression::Terminal(token_type) if T::matches(&token_type, token)? => {
+            RuleExpression::Terminal(token_type) if T::matches(token_type, token)? => {
                 if let Some(parent) = node.parent.clone() {
-                    advance_auto(parent, parser, node.parent_data)
+                    advance_auto(&parent, parser, node.parent_data)
                 }
                 else {
                     Err(ParseError("Terminal Expression has no parent".to_string()))
@@ -346,7 +346,7 @@ fn advance_token<'a, T: Token>(node: Rc<GSSNode<'a>>, token: &T, parser: &'a Par
 } 
 
 /* In this case, there is no token to consume. */
-fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, caller_parent_data: GSSParentData) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
+fn advance_auto<'a, T: Token>(node: &Rc<GSSNode<'a>>, parser: &'a Parser<T>, caller_parent_data: GSSParentData) -> Result<Vec<Rc<GSSNode<'a>>>, ParseError> {
     if caller_parent_data == GSSParentData::Done {
         return Ok(vec![]);
     }
@@ -355,7 +355,7 @@ fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, call
         RuleExpression::Terminal(_) => Err(ParseError("Tried to advance terminal without token".to_owned())),
         RuleExpression::RuleName(_) => {
             match node.parent.clone() {
-                Some(parent) => advance_auto(parent, parser, node.parent_data),
+                Some(parent) => advance_auto(&parent, parser, node.parent_data),
                 None => Ok(vec![GSSNode {expr: node.expr, parent: None, parent_data: GSSParentData::Done}.into()])
             }
         } 
@@ -363,7 +363,7 @@ fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, call
             if let GSSParentData::Index(i) = caller_parent_data {
                 if i+1 >= sub_exprs.len() {
                     advance_auto(
-                        node.parent.clone().ok_or(ParseError("Concatenation without parent".to_owned()))?, 
+                        &node.parent.clone().ok_or(ParseError("Concatenation without parent".to_owned()))?, 
                         parser,
                         node.parent_data
                     )
@@ -371,7 +371,7 @@ fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, call
                 else {
                     resolve_to_terminals(Rc::new(GSSNode {
                         expr: &sub_exprs[i+1], 
-                        parent: Some(Rc::clone(&node)),
+                        parent: Some(Rc::clone(node)),
                         parent_data: GSSParentData::Index(i+1)
                     }), parser)
                 }
@@ -382,7 +382,7 @@ fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, call
         }
         RuleExpression::Alternatives(_) | RuleExpression::Optional(_) => {
             match node.parent.clone() {
-                Some(parent) => advance_auto(parent, parser, node.parent_data),
+                Some(parent) => advance_auto(&parent, parser, node.parent_data),
                 None => Err(ParseError("Alternatives or Optional lack parent".to_string()))
             }
         }
@@ -391,10 +391,10 @@ fn advance_auto<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<T>, call
                 Some(parent) => Ok(
                     resolve_to_terminals(Rc::new(GSSNode { 
                         expr: sub_expr, 
-                        parent: Some(Rc::clone(&node)), 
+                        parent: Some(Rc::clone(node)), 
                         parent_data: GSSParentData::NoData 
                     }), parser)?.into_iter()
-                        .chain(advance_auto(parent, parser, node.parent_data)?.into_iter())
+                        .chain(advance_auto(&parent, parser, node.parent_data)?.into_iter())
                         .collect::<Vec<_>>()
                 ),
                 None => Err(ParseError("OneOrMore or Many lack parent".to_string()))
@@ -409,7 +409,7 @@ fn resolve_to_terminals<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<
         RuleExpression::Terminal(_) => Ok(vec![node]),
         RuleExpression::RuleName(name) => {
             resolve_to_terminals(Rc::new(GSSNode {
-                expr: parser.rules.get(name).ok_or(ParseError(format!("Cannot recognize rule {}", name)))?, 
+                expr: parser.rules.get(name).ok_or(ParseError(format!("Cannot recognize rule {name}")))?, 
                 parent: Some(node), 
                 parent_data: GSSParentData::NoData
             }), parser)
@@ -437,7 +437,7 @@ fn resolve_to_terminals<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<
             )
         },
         RuleExpression::Many(_) => {
-            advance_auto(node, parser, GSSParentData::NoData)
+            advance_auto(&node, parser, GSSParentData::NoData)
         },
         RuleExpression::Optional(sub_expr) => {
             Ok(
@@ -446,7 +446,7 @@ fn resolve_to_terminals<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<
                     parent: Some(Rc::clone(&node)),
                     parent_data: GSSParentData::NoData
                 }), parser)?.into_iter()
-                    .chain(advance_auto(node, parser, GSSParentData::NoData)?.into_iter())
+                    .chain(advance_auto(&node, parser, GSSParentData::NoData)?.into_iter())
                     .collect()
             )
         },
@@ -478,10 +478,10 @@ mod tests {
             Hex: "#" HexNum HexNum HexNum HexNum HexNum HexNum ;
             Num: "0" | "1" | "2" | "3" ; # Proof of concept
             HexNum: Num | "A" | "B" | "C" ; # Proof of concept
-        "##.to_string()).expect("Parser definition ok");
+        "##).expect("Parser definition ok");
 
         let tree = parser
-            .parse_string("Color (1 3 0)".to_string(), "Color")
+            .parse_string("Color (1 3 0)", "Color")
             .expect("No error");
 
         assert_eq!(tree.to_string(), indoc! {"
@@ -508,7 +508,7 @@ mod tests {
         );
 
         let tree = parser
-            .parse_string("#ABC012".to_string(), "Color")
+            .parse_string("#ABC012", "Color")
             .expect("No error");
 
         println!("{}", tree);
@@ -544,13 +544,13 @@ mod tests {
         let parser: Parser<CharToken> = crate::define::define_parser(r##"
             Num : "1" | "2" | "3" | "4" ; # Incomplete ofc
             AddExpr: Num ("+" AddExpr)? ;
-        "##.to_string()).expect("Parser definition ok");
+        "##).expect("Parser definition ok");
 
         // Modifiers bind tightly, so this should fial
-        parser.parse_string("12".to_string(), "AddExpr").expect_err("Should fail");
+        parser.parse_string("12", "AddExpr").expect_err("Should fail");
 
         let tree = parser
-            .parse_string("1+2+3+4".to_string(), "AddExpr")
+            .parse_string("1+2+3+4", "AddExpr")
             .expect("No error");
 
         assert_eq!(tree.to_string(), indoc! {"
@@ -580,10 +580,10 @@ mod tests {
             Rule : ManyA "b"+ ManyC "d"+;
             ManyA: "a"*;
             ManyC: "c"*; 
-        "##.to_string()).expect("Parser definition ok");
+        "##).expect("Parser definition ok");
 
         let tree = parser
-            .parse_string("abbdddd".to_string(), "Rule")
+            .parse_string("abbdddd", "Rule")
             .expect("No error");
 
         assert_eq!(tree.to_string(), indoc! {"

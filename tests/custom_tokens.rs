@@ -32,7 +32,7 @@ fn tests_work() {
         Program : Loop Loop Loop ;
 
         Loop : (_KeywordFor | _KeywordWhile) _NonKeyword+ ;
-    "#.to_string()).expect("Defined successfully");
+    "#).expect("Defined successfully");
 
     let tokens = vec![
         CustomToken("for".to_string()),

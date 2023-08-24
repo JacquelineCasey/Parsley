@@ -6,7 +6,7 @@ static mut INDENT: usize = 0;
 #[allow(dead_code)]
 pub fn indent() -> String {
     unsafe {
-        std::iter::repeat(' ').take(INDENT * 4).collect::<String>()
+        " ".repeat(INDENT * 4)
     }
 }
 
@@ -14,7 +14,7 @@ pub fn indent() -> String {
 pub fn more_indent() -> String {
     unsafe {
         INDENT += 1;
-        std::iter::repeat(' ').take(INDENT * 4).collect::<String>()
+        " ".repeat(INDENT * 4)
     }
 }
 
@@ -22,7 +22,7 @@ pub fn more_indent() -> String {
 pub fn less_indent() -> String {
     unsafe {
         INDENT -= 1;
-        std::iter::repeat(' ').take(INDENT * 4).collect::<String>()
+        " ".repeat(INDENT * 4)
     }
 }
 

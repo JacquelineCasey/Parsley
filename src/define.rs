@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 /* Public Interface */
 
-pub fn define_parser<T: Token>(definition: String) -> Result<Parser<T>, DefinitionError> {
+pub fn define_parser<T: Token>(definition: &str) -> Result<Parser<T>, DefinitionError> {
     let tokens = tokenize(definition)?;
     let rule_token_slices = tokens.split(|t| t == &DefinitionToken::Operator(Operator::Semicolon));
 
@@ -80,7 +80,7 @@ pub enum RuleExpression {
 
 /* Converts a string into tokens. Whitespace is removed, but considered in order
  * to differentiate adjacent identifiers. Also strips comments */
-fn tokenize(definition: String) -> Result<Vec<DefinitionToken>, DefinitionError> {
+fn tokenize(definition: &str) -> Result<Vec<DefinitionToken>, DefinitionError> {
     let mut tokens = Vec::new();
     let mut curr_token = String::new();
     let mut quote_mode = false;
@@ -156,15 +156,15 @@ fn string_to_token(mut string: String) -> Result<DefinitionToken, DefinitionErro
         "?" => Ok(DefinitionToken::Operator(Operator::QuestionMark)),
         "(" => Ok(DefinitionToken::LeftParenthesis),
         ")" => Ok(DefinitionToken::RightParenthesis),
-        _ if string.chars().nth(0) == Some('"') && string.chars().last() == Some('"') 
+        _ if string.starts_with('"') && string.ends_with('"')
             => {
                 string.remove(string.len() - 1);
                 string.remove(0);
-                Ok(DefinitionToken::StringLiteral(deliteralize(string)?))
+                Ok(DefinitionToken::StringLiteral(deliteralize(&string)?))
             }
-        _ if string.chars().all(|ch| is_identifier_char(ch))
+        _ if string.chars().all(is_identifier_char)
             => Ok(DefinitionToken::Identifier(string)),
-        _ => Err(DefinitionError(format!("Unrecognized token in parser definition: \"{}\"", string)))
+        _ => Err(DefinitionError(format!("Unrecognized token in parser definition: \"{string}\"")))
     }
 }
 
@@ -179,7 +179,7 @@ fn is_identifier_char(char: char) -> bool {
  * i.e. those that can be typed written as a backslash followed by a single character.
  * There are other escape sequences that could be supported, but I would need to
  * rewrite tokenize() above to be smarter. */
-fn deliteralize(string: String) -> Result<String, DefinitionError> {
+fn deliteralize(string: &str) -> Result<String, DefinitionError> {
     let mut result = String::new();
 
     let mut slash_mode = false;
@@ -198,17 +198,15 @@ fn deliteralize(string: String) -> Result<String, DefinitionError> {
 
             slash_mode = false;
         }
+        else if ch == '\\' {
+            slash_mode = true;
+        }
         else {
-            if ch == '\\' {
-                slash_mode = true;
-            }
-            else {
-                result.push(ch);
-            }
+            result.push(ch);
         }
     }
 
-    return Ok(result);
+    Ok(result)
 }
 
 fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpression), DefinitionError> {
@@ -223,11 +221,12 @@ fn parse_rule<T: Token>(tokens: &[DefinitionToken]) -> Result<(String, RuleExpre
         _ => Err(DefinitionError("First token of rule must be an identifier. Syntax: <Rule> : <Rule Expression> ;".to_owned()))?
     };
 
-    return Ok((rule_name, parse_expression::<T>(tokens[2..].to_vec())?));
+    Ok((rule_name, parse_expression::<T>(&tokens[2..])?))
 }
 
-fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpression, DefinitionError> {
-    if tokens.len() == 0 {
+#[allow(clippy::match_on_vec_items)]
+fn parse_expression<T: Token>(tokens: &[DefinitionToken]) -> Result<RuleExpression, DefinitionError> {
+    if tokens.is_empty() {
         return Err(DefinitionError("Encountered empty subexpression".to_string()));
     }
 
@@ -270,7 +269,7 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
     }
 
     if min_precedence_indices.is_empty() {
-        return parse_expression::<T>(tokens[1..tokens.len()-1].to_vec());
+        return parse_expression::<T>(&tokens[1..tokens.len()-1]);
     }
 
     match tokens[min_precedence_indices[0]] {
@@ -281,11 +280,10 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
 
             let sub_expressions = delimiters.clone()
                 .zip(delimiters.skip(1))
-                .map(|(left, right)| parse_expression::<T>(tokens[((left+1) as usize)..(right as usize)].to_vec()))
+                .map(|(left, right)| parse_expression::<T>(&tokens[((left+1) as usize)..(right as usize)]))
                 .collect::<Result<Vec<RuleExpression>, DefinitionError>>()?;
             Ok(RuleExpression::Alternatives(sub_expressions))
         }
-
         DefinitionToken::Identifier(_) | DefinitionToken::StringLiteral(_) 
         | DefinitionToken::Operator(Operator::Plus | Operator::Star | Operator::QuestionMark) => {
             let mut paren_nesting = 0;
@@ -303,28 +301,28 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
                 else if tokens[i] == DefinitionToken::RightParenthesis {
                     paren_nesting -= 1;
                     if paren_nesting == 0 {
-                        sub_expressions.push(parse_expression::<T>(tokens[curr_left_paren + 1..i].to_vec())?);
+                        sub_expressions.push(parse_expression::<T>(&tokens[curr_left_paren + 1..i])?);
                     }
                 }
                 else if paren_nesting == 0 {
                     match &tokens[i] {
-                        DefinitionToken::Identifier(rule_name) if rule_name.chars().nth(0).expect("exists") == '_'
+                        DefinitionToken::Identifier(rule_name) if rule_name.chars().next().expect("exists") == '_'
                             => sub_expressions.push(RuleExpression::Terminal(rule_name[1..].to_string())),
                         DefinitionToken::Identifier(rule_name)
                             => sub_expressions.push(RuleExpression::RuleName(rule_name.clone())),
                         DefinitionToken::StringLiteral(literal)
-                            => sub_expressions.push(literal_to_combination::<T>(literal.clone())?),
+                            => sub_expressions.push(literal_to_combination::<T>(literal)?),
                         DefinitionToken::Operator(Operator::Plus) => {
                             let len = sub_expressions.len();  // appease borrow checker
-                            sub_expressions[len - 1] = RuleExpression::OneOrMore(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                            sub_expressions[len - 1] = RuleExpression::OneOrMore(Box::new(sub_expressions[sub_expressions.len() - 1].clone()));
                         }
                         DefinitionToken::Operator(Operator::Star) => {
                             let len = sub_expressions.len();  
-                            sub_expressions[len - 1] = RuleExpression::Many(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                            sub_expressions[len - 1] = RuleExpression::Many(Box::new(sub_expressions[sub_expressions.len() - 1].clone()));
                         }
                         DefinitionToken::Operator(Operator::QuestionMark) => {
                             let len = sub_expressions.len();  
-                            sub_expressions[len - 1] = RuleExpression::Optional(Box::new(sub_expressions[sub_expressions.len() - 1].clone()))
+                            sub_expressions[len - 1] = RuleExpression::Optional(Box::new(sub_expressions[sub_expressions.len() - 1].clone()));
                         }
                         _ => ()
                     }
@@ -338,25 +336,25 @@ fn parse_expression<T: Token>(tokens: Vec<DefinitionToken>) -> Result<RuleExpres
             Ok(RuleExpression::Concatenation(sub_expressions))
         }
 
-        DefinitionToken::Operator(a) => Err(DefinitionError(format!("Bad operator {:?}", a))),
+        DefinitionToken::Operator(a) => Err(DefinitionError(format!("Bad operator {a:?}"))),
 
-        DefinitionToken::LeftParenthesis => Err(DefinitionError("Subexpression is only parentheses".to_string())),
-
-        DefinitionToken::RightParenthesis => Err(DefinitionError("Subexpression is only parentheses".to_string())),
+        DefinitionToken::LeftParenthesis | DefinitionToken::RightParenthesis 
+            => Err(DefinitionError("Subexpression is only parentheses".to_string())),
     }
 }
 
-fn literal_to_combination<T: Token>(literal: String) -> Result<RuleExpression, DefinitionError> {
-    match T::type_sequence_from_literal(&literal) {
-        Some(sequence) if sequence.len() == 0 => Err(DefinitionError("Matching no tokens is forbidden".to_string())),
+fn literal_to_combination<T: Token>(literal: &str) -> Result<RuleExpression, DefinitionError> {
+    match T::type_sequence_from_literal(literal) {
+        Some(sequence) if sequence.is_empty() => Err(DefinitionError("Matching no tokens is forbidden".to_string())),
         Some(sequence) if sequence.len() == 1 => Ok(RuleExpression::Terminal(sequence[0].clone())),
         Some(sequence) if sequence.len() > 1
-            => Ok(RuleExpression::Concatenation(sequence.into_iter().map(|t| RuleExpression::Terminal(t)).collect())),
+            => Ok(RuleExpression::Concatenation(sequence.into_iter().map(RuleExpression::Terminal).collect())),
         Some(_) => Err(DefinitionError("Something went horribly wrong".to_owned())),
         None => Err(DefinitionError("Token type does not support converting string literals".to_owned())),
     }
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn validate_parser<T: Token>(parser: Parser<T>) -> Result<Parser<T>, DefinitionError> {
     // TODO!
 
@@ -380,7 +378,7 @@ mod tests {
     #[test]
     fn test_tokenize() {
         assert_eq!(
-            tokenize("foo : abc (Foo_bAr ham)   \t \n\n | (  egg|(cheese)) ;".to_string()),
+            tokenize("foo : abc (Foo_bAr ham)   \t \n\n | (  egg|(cheese)) ;"),
             Ok(vec![
                 Identifier("foo".to_string()),
                 Operator(Colon),
@@ -408,7 +406,7 @@ mod tests {
         // And also tokenize
 
         assert_eq!(
-            parse_rule::<crate::CharToken>(&tokenize("Color : Number Number Number | HexString | ColorName".to_string()).unwrap()),
+            parse_rule::<crate::CharToken>(&tokenize("Color : Number Number Number | HexString | ColorName").unwrap()),
             Ok(("Color".to_string(), Alternatives(vec![
                 Concatenation(vec![
                     RuleName("Number".to_string()),
@@ -421,7 +419,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_rule::<crate::CharToken>(&tokenize("Rule: (A | (B | (C) D) | ((E)))".to_string()).unwrap()),
+            parse_rule::<crate::CharToken>(&tokenize("Rule: (A | (B | (C) D) | ((E)))").unwrap()),
             Ok(("Rule".to_string(), Alternatives(vec![
                 RuleName("A".to_string()),
                 Alternatives(vec![
@@ -436,18 +434,18 @@ mod tests {
         );
 
         assert_eq!(
-            parse_rule::<crate::CharToken>(&tokenize(r#"Coordinate: ("A" | "B" | "C") " " ("1" | "2" | "3")"#.to_string()).unwrap()),
+            parse_rule::<crate::CharToken>(&tokenize(r#"Coordinate: ("A" | "B" | "C") " " ("1" | "2" | "3")"#).unwrap()),
             Ok(("Coordinate".to_string(), Concatenation(vec![
                 Alternatives(vec![
-                    literal_to_combination::<crate::CharToken>("A".to_string()).unwrap(), // Actually not combinations btw
-                    literal_to_combination::<crate::CharToken>("B".to_string()).unwrap(),
-                    literal_to_combination::<crate::CharToken>("C".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("A").unwrap(), // Actually not combinations btw
+                    literal_to_combination::<crate::CharToken>("B").unwrap(),
+                    literal_to_combination::<crate::CharToken>("C").unwrap(),
                 ]),
-                literal_to_combination::<crate::CharToken>(" ".to_string()).unwrap(),
+                literal_to_combination::<crate::CharToken>(" ").unwrap(),
                 Alternatives(vec![
-                    literal_to_combination::<crate::CharToken>("1".to_string()).unwrap(),
-                    literal_to_combination::<crate::CharToken>("2".to_string()).unwrap(),
-                    literal_to_combination::<crate::CharToken>("3".to_string()).unwrap(),
+                    literal_to_combination::<crate::CharToken>("1").unwrap(),
+                    literal_to_combination::<crate::CharToken>("2").unwrap(),
+                    literal_to_combination::<crate::CharToken>("3").unwrap(),
                 ]),
             ])))
         );
@@ -477,7 +475,7 @@ mod tests {
         all_characters_no_quote : (alphabetic_character | white_space | digit) ; # Definitely incomplete...
         "#.to_string();
 
-        let parser : Parser<crate::CharToken> = define_parser(def).expect("ok");
+        let parser : Parser<crate::CharToken> = define_parser(&def).expect("ok");
 
         ["program", "identifier", "number", "string", "assignment", "alphabetic_character", "digit", "white_space", "all_characters_no_quote"]
             .map(|name| {
