@@ -1,172 +1,54 @@
 
+use super::{Token, Parser, SyntaxTree, ParseError};
 use crate::define::RuleExpression;
-
-use hashable_rc::HashableRc;
+use std::rc::Rc;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+
+use hashable_rc::HashableRc;
 
 
-/* Public Interface */
+pub fn gss_parse_tokens<T: Token>(parser: &Parser<T>, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
+    let root_expr = RuleExpression::RuleName(start_rule.to_string());
+    let root_link = Rc::new(GSSLink {
+        node: Rc::new(GSSNode {expr: &root_expr, parent: None, parent_data: GSSParentData::NoData}),
+        prev: vec![]
+    });
+    
+    /* gss[i] holds all terminals that are set to try to match tokens[i].
+     * When the algorithm is finished, the last layer (gss[tokens.len()])
+     * holds nodes representing parser processes that have consumed all tokens. */
+    let mut gss: Vec<Vec<Rc<GSSLink>>> = vec![
+        resolve_to_terminals(Rc::clone(&root_link.node), parser)?.into_iter()
+            .map(|node| Rc::new(GSSLink {node, prev: vec![Rc::clone(&root_link)]}))
+            .collect()
+    ];
 
-pub struct Parser<T: Token> {
-    pub(crate) phantom: std::marker::PhantomData<T>,  // Act like we own a T
-    pub(crate) rules: HashMap<String, RuleExpression>
-}
+    for token in &tokens {
+        let mut next_layer = vec![];
 
-#[derive(Debug)]
-pub enum SyntaxTree<T: Token> {
-    RuleNode {rule_name: String, subexpressions: Vec<SyntaxTree<T>>},
-    TokenNode (T)
-}
-
-impl<T: Token + std::fmt::Display> std::fmt::Display for SyntaxTree<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Syntax Tree {")?;
-        self.helper_fmt(1, f)?;
-        f.write_str("\n}")
-    }
-}
-
-impl<T: Token + std::fmt::Display> SyntaxTree<T> {
-    fn helper_fmt(&self, level: usize, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("\n")?;
-        f.write_str(&" ".repeat(level * 4))?;
-        match self {
-            SyntaxTree::RuleNode {rule_name, subexpressions} => {
-                f.write_str(rule_name)?;
-                for expr in subexpressions {
-                    expr.helper_fmt(level + 1, f)?;
-                    // f.write_str("\n")?
-                }
-                Ok(())
-            },
-            SyntaxTree::TokenNode(token) => {
-                f.write_str(&format!("token ({token})"))
-            }
+        for link in gss.last().ok_or(ParseError("gss uninitialized".to_string()))? {
+            next_layer.extend(
+                advance_token(&link.node, token, parser)?.into_iter()
+                    .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(link)]}))
+                    .collect::<Vec<_>>()
+            );
         }
 
+        // TODO: Implement merging.
+
+        gss.push(next_layer);
     }
+    
+    /* Backtracks from the final node to the first. Final and first are removed, since they are the root rule. 
+     * All other nodes correspond to tokens. */
+    let backtrace = Parser::<T>::get_backtrace(&gss)?;
+
+    /* Uses the backtrace to determine the hierarchy of rules and tokens, i.e.
+     * the final syntax tree */
+    Parser::<T>::backtrace_to_tree(backtrace, tokens)
 }
-
-#[derive(Debug)]
-pub struct ParseError (pub String);
-
-/* Represents a token.
- *
- * This is a trait so that users can define parsers over specific alphabets beyond
- * what we support out of the box. It can also be useful to allow a language to
- * provide detailed error messages, or simply to run faster (tokenization is often O(n),
- * and most parsing algorithms are O(n^3) worst case, so preprocessing to shorten the
- * list of tokens can be useful).
- * 
- * Tokens need not track their own location in the source file, that will eventually
- * be done by the parser. */
-pub trait Token : Sized + std::fmt::Debug {
-    /* If the parser definition contains a rule with a name starting with an underscore,
-     * e.g. "_ascii_lower", then instead of acting as a normal rule, it will act
-     * as a special rule that dispatches to this function.
-     * 
-     * This function receives the token type (e.g. "ascii_lower") without the leading
-     * underscore. It should return true if the parser accepts the current token.
-     * 
-     * It is permitted to return ParseError if something goes wrong. For example, 
-     * receiving an unknown token_type. 
-     * 
-     * Note: if you also override type_sequence_from_literal, then you define which
-     * token_types are fed into this function. */
-    fn matches(token_type: &str, token: &Self) -> Result<bool, ParseError>;
-
-    /* Converts a literal string in the definition language into a sequence of
-     * strings that are later fed into match() as token_type, one by one.
-     * 
-     * Notably, CharToken provides this feature as the main way to match terminals. 
-     * Most custom token types will not need to provide this. */
-     fn type_sequence_from_literal(_literal: &str) -> Option<Vec<String>> {
-        None
-    }
-}
-
-/* A token that represents  */
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CharToken {
-    /* Unlike most tokens, a single field is sufficient, as all token_types have
-     * a single possible value (the character). */
-    pub token_type: String,  // String for annoying ownership reasons. Will validate that its a single character.
-}
-
-impl Token for CharToken {
-    fn type_sequence_from_literal(literal: &str) -> Option<Vec<String>> {
-        return Some(literal.chars().map(|c| c.to_string()).collect())
-    }
-
-    /* Simplest possible match behavior */
-    fn matches(token_type: &str, token: &Self) -> Result<bool, ParseError> {
-        Ok(token_type == token.token_type)
-    }
-}
-
-impl std::fmt::Display for CharToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.token_type)
-    }
-}
-
-impl<T: Token> Parser<T> {
-    pub fn parse_tokens(&self, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
-        let root_expr = RuleExpression::RuleName(start_rule.to_string());
-        let root_link = Rc::new(GSSLink {
-            node: Rc::new(GSSNode {expr: &root_expr, parent: None, parent_data: GSSParentData::NoData}),
-            prev: vec![]
-        });
-        
-        /* gss[i] holds all terminals that are set to try to match tokens[i].
-         * When the algorithm is finished, the last layer (gss[tokens.len()])
-         * holds nodes representing parser processes that have consumed all tokens. */
-        let mut gss: Vec<Vec<Rc<GSSLink>>> = vec![
-            resolve_to_terminals(Rc::clone(&root_link.node), self)?.into_iter()
-                .map(|node| Rc::new(GSSLink {node, prev: vec![Rc::clone(&root_link)]}))
-                .collect()
-        ];
-
-        for token in &tokens {
-            let mut next_layer = vec![];
-
-            for link in gss.last().ok_or(ParseError("gss uninitialized".to_string()))? {
-                next_layer.extend(
-                    advance_token(&link.node, token, self)?.into_iter()
-                        .map(|node| Rc::new(GSSLink {node: Rc::clone(&node), prev: vec![Rc::clone(link)]}))
-                        .collect::<Vec<_>>()
-                );
-            }
-
-            // TODO: Implement merging.
-
-            gss.push(next_layer);
-        }
-        
-        /* Backtracks from the final node to the first. Final and first are removed, since they are the root rule. 
-         * All other nodes correspond to tokens. */
-        let backtrace = Parser::<T>::get_backtrace(&gss)?;
-
-        /* Uses the backtrace to determine the hierarchy of rules and tokens, i.e.
-         * the final syntax tree */
-        Parser::<T>::backtrace_to_tree(backtrace, tokens)
-    }
-}
-
-impl Parser<CharToken> {
-    pub fn parse_string(&self, input: &str, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
-        let tokens = input.chars()
-            .map(|ch| CharToken { token_type: ch.to_string() })
-            .collect();
-        self.parse_tokens(tokens, start_rule)
-    }
-}
-
-
-/* Private Implementation */
 
 #[derive(Clone, Debug)]
 enum IntermediateSyntaxTree<T: Token> { // Vec contains Rc's, to be removed later.
@@ -458,151 +340,4 @@ fn resolve_to_terminals<'a, T: Token>(node: Rc<GSSNode<'a>>, parser: &'a Parser<
             }), parser)
         }
     }
-}
-
-
-/* Tests */
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use indoc::indoc;
-
-    
-    #[test]
-    fn parsing_does_not_explode_color() {
-        let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Color: RGB | Hex ;
-            RGB: "Color"  " "  "(" Num " " Num " " Num ")" ;
-            Hex: "#" HexNum HexNum HexNum HexNum HexNum HexNum ;
-            Num: "0" | "1" | "2" | "3" ; # Proof of concept
-            HexNum: Num | "A" | "B" | "C" ; # Proof of concept
-        "##).expect("Parser definition ok");
-
-        let tree = parser
-            .parse_string("Color (1 3 0)", "Color")
-            .expect("No error");
-
-        assert_eq!(tree.to_string(), indoc! {"
-        Syntax Tree {
-            Color
-                RGB
-                    token (C)
-                    token (o)
-                    token (l)
-                    token (o)
-                    token (r)
-                    token ( )
-                    token (()
-                    Num
-                        token (1)
-                    token ( )
-                    Num
-                        token (3)
-                    token ( )
-                    Num
-                        token (0)
-                    token ())
-        }"}
-        );
-
-        let tree = parser
-            .parse_string("#ABC012", "Color")
-            .expect("No error");
-
-        println!("{}", tree);
-
-        assert_eq!(tree.to_string(), indoc! {"
-            Syntax Tree {
-                Color
-                    Hex
-                        token (#)
-                        HexNum
-                            token (A)
-                        HexNum
-                            token (B)
-                        HexNum
-                            token (C)
-                        HexNum
-                            Num
-                                token (0)
-                        HexNum
-                            Num
-                                token (1)
-                        HexNum
-                            Num
-                                token (2)
-            }"}
-            );
-
-
-    }
-
-    #[test]
-    fn parsing_does_not_explode_optional() {
-        let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Num : "1" | "2" | "3" | "4" ; # Incomplete ofc
-            AddExpr: Num ("+" AddExpr)? ;
-        "##).expect("Parser definition ok");
-
-        // Modifiers bind tightly, so this should fial
-        parser.parse_string("12", "AddExpr").expect_err("Should fail");
-
-        let tree = parser
-            .parse_string("1+2+3+4", "AddExpr")
-            .expect("No error");
-
-        assert_eq!(tree.to_string(), indoc! {"
-            Syntax Tree {
-                AddExpr
-                    Num
-                        token (1)
-                    token (+)
-                    AddExpr
-                        Num
-                            token (2)
-                        token (+)
-                        AddExpr
-                            Num
-                                token (3)
-                            token (+)
-                            AddExpr
-                                Num
-                                    token (4)
-            }"}
-        );
-    }
-
-    #[test]
-    fn parsing_does_not_explode_many() {
-        let parser: Parser<CharToken> = crate::define::define_parser(r##"
-            Rule : ManyA "b"+ ManyC "d"+;
-            ManyA: "a"*;
-            ManyC: "c"*; 
-        "##).expect("Parser definition ok");
-
-        let tree = parser
-            .parse_string("abbdddd", "Rule")
-            .expect("No error");
-
-        assert_eq!(tree.to_string(), indoc! {"
-            Syntax Tree {
-                Rule
-                    ManyA
-                        token (a)
-                    token (b)
-                    token (b)
-                    token (d)
-                    token (d)
-                    token (d)
-                    token (d)
-            }"} // Note that ManyC is not shown at all... We kinda have to accept this
-            // since otherwise we would have to figure out after the fact where ManyC
-            // fits in, which could be hard if for example it were surrounded by
-            // other ManyC's that did parse (especially if they had quantifiers).
-            // Basically, we would have to rethink what data ends up in the GSS,
-            // and that sounds really unpleasant.
-        );
-    }   
 }
