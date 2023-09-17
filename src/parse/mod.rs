@@ -1,12 +1,8 @@
 
-mod gss_parser;
 mod backtracking_parser;
-
-#[cfg(test)]
-mod tests;
+#[cfg(test)] mod tests;
 
 
-use gss_parser::gss_parse_tokens;
 use backtracking_parser::backtracking_parse;
 
 use crate::define::RuleExpression;
@@ -69,7 +65,7 @@ pub struct ParseError (pub String);
  * 
  * Tokens need not track their own location in the source file, that will eventually
  * be done by the parser. */
-pub trait Token : Sized + std::fmt::Debug {
+pub trait Token : Sized + std::fmt::Debug + Clone {
     /* If the parser definition contains a rule with a name starting with an underscore,
      * e.g. "_ascii_lower", then instead of acting as a normal rule, it will act
      * as a special rule that dispatches to this function.

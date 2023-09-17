@@ -1,7 +1,7 @@
 use parsley::Token;
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CustomToken (String);
 
 impl Token for CustomToken {

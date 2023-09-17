@@ -15,12 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
 
 [[package]]
-name = "hashable_rc"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2782fc90c5d42929fcc55759818f8955a1cd8a170e5c526bfb5840779e5bea3d"
-
-[[package]]
 name = "indoc"
 version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -40,7 +34,6 @@ name = "parsley"
 version = "0.1.0"
 dependencies = [
  "by_address",
- "hashable_rc",
  "indoc",
  "itertools",
 ]

@@ -4,7 +4,32 @@ use indoc::indoc;
 
 
 #[test]
-fn parsing_does_not_explode_color() {
+fn concatenation() {
+    let parser: Parser<CharToken> = crate::define::define_parser(r##"
+        Start: A B C ;
+        A: "a" ;
+        B: "b" ;
+        C: "c" ;
+    "##).expect("Parser definition ok");
+
+    let tree = parser
+        .parse_string("abc", "Start")
+        .expect("No error");
+
+    assert_eq!(tree.to_string(), indoc! {"
+    Syntax Tree {
+        Start
+            A
+                token (a)
+            B
+                token (b)
+            C
+                token (c)
+    }"});
+}
+
+#[test]
+fn color() {
     let parser: Parser<CharToken> = crate::define::define_parser(r##"
         Color: RGB | Hex ;
         RGB: "Color"  " "  "(" Num " " Num " " Num ")" ;
@@ -67,13 +92,11 @@ fn parsing_does_not_explode_color() {
                         Num
                             token (2)
         }"}
-        );
-
-
+    );
 }
 
 #[test]
-fn parsing_does_not_explode_optional() {
+fn optional() {
     let parser: Parser<CharToken> = crate::define::define_parser(r##"
         Num : "1" | "2" | "3" | "4" ; # Incomplete ofc
         AddExpr: Num ("+" AddExpr)? ;
@@ -108,7 +131,7 @@ fn parsing_does_not_explode_optional() {
 }
 
 #[test]
-fn parsing_does_not_explode_many() {
+fn many() {
     let parser: Parser<CharToken> = crate::define::define_parser(r##"
         Rule : ManyA "b"+ ManyC "d"+;
         ManyA: "a"*;
