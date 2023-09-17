@@ -120,6 +120,8 @@ impl std::fmt::Display for CharToken {
 impl<T: Token> Parser<T> {
     pub fn parse_tokens(&self, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
         gss_parse_tokens(self, tokens, start_rule)
+
+        // recursive_parse_tokens();
     }
 }
 
