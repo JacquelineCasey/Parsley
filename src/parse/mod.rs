@@ -1,11 +1,13 @@
 
 mod gss_parser;
+mod backtracking_parser;
 
 #[cfg(test)]
 mod tests;
 
 
 use gss_parser::gss_parse_tokens;
+use backtracking_parser::backtracking_parse;
 
 use crate::define::RuleExpression;
 
@@ -119,9 +121,9 @@ impl std::fmt::Display for CharToken {
 
 impl<T: Token> Parser<T> {
     pub fn parse_tokens(&self, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
-        gss_parse_tokens(self, tokens, start_rule)
+        // gss_parse_tokens(self, tokens, start_rule)
 
-        // recursive_parse_tokens();
+        backtracking_parse(self, &tokens, start_rule)
     }
 }
 
