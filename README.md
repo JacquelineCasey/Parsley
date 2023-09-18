@@ -134,3 +134,9 @@ anything more would require me to make significant assumptions on the end user's
 use case.
 
 Happy parsing!
+
+---
+
+To see Parsley at scale, see the programming language I've been writing here:
+https://github.com/jackcasey067/nom/.
+
