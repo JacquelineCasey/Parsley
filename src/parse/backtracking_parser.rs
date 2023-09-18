@@ -30,6 +30,14 @@ impl<'a, T: Token> Ord for Continuation<'a, T> {
     }
 }
 
+// Wrapper around the stacker library to ensure the stack keeps growing.
+// It will eventually move onto the heap.
+pub fn stack_safe<R, F: FnOnce() -> R>(callback: F) -> R {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        callback()
+    })
+}
+
 pub fn backtracking_parse<T: Token>(parser: &Parser<T>, tokens: &[T], start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
     let start_expr = RuleExpression::RuleName(start_rule.to_string());
 
@@ -75,7 +83,7 @@ fn parse_expr<'a, T: Token>(
         RuleExpression::RuleName(rule_name) => {
             match parser.rules.get(rule_name) {
                 Some(rule_expr) => {
-                    parse_expr(parser, tokens, token_index, rule_expr, memo_map)?;
+                    stack_safe(|| parse_expr(parser, tokens, token_index, rule_expr, memo_map))?;
                     continuations = memo_map[&(ByAddress(rule_expr), token_index)].clone().into_iter()
                         .map(|Continuation (a, subtrees)| 
                             Continuation (a, vec![Rc::new(IntermediateSyntaxTree::RuleNode { rule_name, subexpressions: subtrees })])
@@ -93,7 +101,7 @@ fn parse_expr<'a, T: Token>(
             for expr in exprs {
                 let mut next_pass = Vec::new();
                 for Continuation (index, old_trees) in curr_pass.iter() {
-                    parse_expr(parser, tokens, *index, expr, memo_map)?;
+                    stack_safe(|| parse_expr(parser, tokens, *index, expr, memo_map))?;
                     next_pass.append(&mut memo_map[&(ByAddress(expr), *index)].clone().into_iter()
                         .map(|Continuation (i, subtrees)| {
                             let mut final_trees = old_trees.clone();
@@ -112,7 +120,7 @@ fn parse_expr<'a, T: Token>(
         },
         RuleExpression::Alternatives(exprs) => {
             for expr in exprs {
-                parse_expr(parser, tokens, token_index, expr, memo_map)?;
+                stack_safe(|| parse_expr(parser, tokens, token_index, expr, memo_map))?;
 
                 continuations.append(&mut memo_map[&(ByAddress(expr), token_index)].clone());
             }
@@ -120,7 +128,7 @@ fn parse_expr<'a, T: Token>(
         RuleExpression::Optional(expr) => {
             continuations.push(Continuation (token_index, vec![]));
 
-            parse_expr(parser, tokens, token_index, expr, memo_map)?;
+            stack_safe(|| parse_expr(parser, tokens, token_index, expr, memo_map))?;
             continuations.append(&mut memo_map[&(ByAddress(&**expr), token_index)].clone());
         },
         RuleExpression::Many(expr) => {
@@ -133,7 +141,7 @@ fn parse_expr<'a, T: Token>(
             loop {
                 let mut next_pass = Vec::new();
                 for Continuation (index, old_trees) in curr_pass.iter() {
-                    parse_expr(parser, tokens, *index, expr, memo_map)?;
+                    stack_safe(|| parse_expr(parser, tokens, *index, expr, memo_map))?;
                     next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
                         .map(|Continuation (i, subtrees)| {
                             let mut final_trees = old_trees.clone();
@@ -162,7 +170,7 @@ fn parse_expr<'a, T: Token>(
             loop {
                 let mut next_pass = Vec::new();
                 for Continuation (index, old_trees) in curr_pass.iter() {
-                    parse_expr(parser, tokens, *index, expr, memo_map)?;
+                    stack_safe(|| parse_expr(parser, tokens, *index, expr, memo_map))?;
                     next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
                         .map(|Continuation (i, subtrees)| {
                             let mut final_trees = old_trees.clone();
