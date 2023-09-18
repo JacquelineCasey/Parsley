@@ -7,7 +7,7 @@ use backtracking_parser::backtracking_parse;
 
 use crate::define::RuleExpression;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 
 /* Public Interface */
@@ -53,7 +53,23 @@ impl<T: Token + std::fmt::Display> SyntaxTree<T> {
 }
 
 #[derive(Debug)]
-pub struct ParseError (pub String);
+pub enum ParseError {
+    Internal (String),
+    IncompleteParse {index: usize, terminals: HashSet<String>},  
+    OutOfInput { terminals: HashSet<String>}, 
+}
+
+impl From<&str> for ParseError {
+    fn from(value: &str) -> Self {
+        ParseError::Internal(value.to_string())
+    }
+}
+
+impl From<String> for ParseError {
+    fn from(value: String) -> Self {
+        ParseError::Internal(value)
+    }
+}
 
 /* Represents a token.
  *

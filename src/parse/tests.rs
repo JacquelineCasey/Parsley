@@ -236,3 +236,44 @@ fn plural_quantifiers() {
         // and that sounds really unpleasant.
     );
 }   
+
+#[test]
+fn errors() {
+    let parser: Parser<CharToken> = crate::define::define_parser(r##"
+        Color: RGB | Hex ;
+        RGB: "Color"  " "  "(" Num " " Num " " Num ")" ;
+        Hex: "#" HexNum HexNum HexNum HexNum HexNum HexNum ;
+        Num: "0" | "1" | "2" | "3" ; # Proof of concept
+        HexNum: Num | "A" | "B" | "C" ; # Proof of concept
+    "##).expect("Parser definition ok");
+
+    match parser.parse_string("Color (1 7 0)", "Color") {
+        Err(ParseError::IncompleteParse { index, terminals }) => {
+            assert_eq!(index, 9);
+            assert!(terminals.contains("0"));
+            assert!(terminals.contains("1"));
+            assert!(terminals.contains("2"));
+            assert!(terminals.contains("3"));
+            assert!(terminals.len() == 4);
+        },
+        _ => panic!("Expected failed parse"),
+    }
+
+    match parser.parse_string("aisbiuag", "Color") {
+        Err(ParseError::IncompleteParse { index, terminals }) => {
+            assert_eq!(index, 0);
+            assert!(terminals.contains("C"));
+            assert!(terminals.contains("#"));
+            assert!(terminals.len() == 2);
+        },
+        _ => panic!("Expected failed parse"),
+    }
+
+    match parser.parse_string("Color (1 2 0", "Color") {
+        Err(ParseError::OutOfInput { terminals }) => {
+            assert!(terminals.contains(")"));
+            assert!(terminals.len() == 1);
+        },
+        _ => panic!("Expected out of input")
+    }
+}

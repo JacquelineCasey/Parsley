@@ -14,7 +14,7 @@ impl Token for CustomToken {
             "KeywordWhile" => 
                 Ok(token.0 == "while"),
             _ => 
-                Err(parsley::ParseError("Bad token type".to_string()))
+                Err("Bad token type".into())
         }
     }
 }
