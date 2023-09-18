@@ -29,6 +29,77 @@ fn concatenation() {
 }
 
 #[test]
+fn more_than_one() {
+    let parser: Parser<CharToken> = crate::define::define_parser(r##"
+        Start: A+ ;
+        A: "a" ;
+    "##).expect("Parser definition ok");
+
+    parser
+        .parse_string("", "Start")
+        .expect_err("Should fail");
+
+    let tree = parser
+        .parse_string("aaaaa", "Start")
+        .expect("No error");
+
+    assert_eq!(tree.to_string(), indoc! {"
+    Syntax Tree {
+        Start
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+    }"});
+}
+
+
+#[test]
+fn many() {
+    let parser: Parser<CharToken> = crate::define::define_parser(r##"
+        Start: "b" A* ;
+        A: "a" ;
+    "##).expect("Parser definition ok");
+
+
+    let tree = parser
+        .parse_string("b", "Start")
+        .expect("No error");
+
+    assert_eq!(tree.to_string(), indoc! {"
+    Syntax Tree {
+        Start
+            token (b)
+    }"});
+
+    let tree = parser
+        .parse_string("baaaaa", "Start")
+        .expect("No error");
+
+    assert_eq!(tree.to_string(), indoc! {"
+    Syntax Tree {
+        Start
+            token (b)
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+            A
+                token (a)
+    }"});
+}
+
+#[test]
 fn color() {
     let parser: Parser<CharToken> = crate::define::define_parser(r##"
         Color: RGB | Hex ;
@@ -131,7 +202,7 @@ fn optional() {
 }
 
 #[test]
-fn many() {
+fn plural_quantifiers() {
     let parser: Parser<CharToken> = crate::define::define_parser(r##"
         Rule : ManyA "b"+ ManyC "d"+;
         ManyA: "a"*;
@@ -142,6 +213,9 @@ fn many() {
         .parse_string("abbdddd", "Rule")
         .expect("No error");
 
+    // Important - although ManyC parsed no tokens, the rule was still closed and it is included in the final tree.
+    // This was NOT the original behavior.
+        
     assert_eq!(tree.to_string(), indoc! {"
         Syntax Tree {
             Rule
@@ -149,6 +223,7 @@ fn many() {
                     token (a)
                 token (b)
                 token (b)
+                ManyC
                 token (d)
                 token (d)
                 token (d)

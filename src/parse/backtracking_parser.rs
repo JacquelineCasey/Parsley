@@ -95,15 +95,12 @@ fn parse_expr<'a, T: Token>(
                 for Continuation (index, old_trees) in curr_pass.iter() {
                     parse_expr(parser, tokens, *index, expr, memo_map)?;
                     next_pass.append(&mut memo_map[&(ByAddress(expr), *index)].clone().into_iter()
-                        .flat_map(|Continuation (i, subtrees)|
-                            subtrees.into_iter()
-                                .map(|tree| {
-                                    let mut next = old_trees.clone();
-                                    next.push(Rc::clone(&tree));
-                                    Continuation(i, next)
-                                })
-                                .collect::<Vec<_>>().into_iter()  // Borrow checker hates the closure, so we collect here.
-                        )
+                        .map(|Continuation (i, subtrees)| {
+                            let mut final_trees = old_trees.clone();
+                            final_trees.append(&mut subtrees.clone());
+
+                            Continuation (i, final_trees)
+                        })
                         .collect()
                     );
                 }
@@ -127,64 +124,64 @@ fn parse_expr<'a, T: Token>(
             continuations.append(&mut memo_map[&(ByAddress(&**expr), token_index)].clone());
         },
         RuleExpression::Many(expr) => {
-            continuations.push(Continuation (token_index, vec![]));
+            continuations.push(Continuation(token_index, vec![]));
 
             let mut curr_pass = Vec::new();  // This needs some work
             curr_pass.push(Continuation (token_index, vec![]));
 
+            // Another bottleneck
             loop {
                 let mut next_pass = Vec::new();
-                for Continuation (index, _) in curr_pass.iter() {
-                    if *index == tokens.len() {
-                        continue;
-                    }
-
+                for Continuation (index, old_trees) in curr_pass.iter() {
                     parse_expr(parser, tokens, *index, expr, memo_map)?;
+                    next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
+                        .map(|Continuation (i, subtrees)| {
+                            let mut final_trees = old_trees.clone();
+                            final_trees.append(&mut subtrees.clone());
 
-                    next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter().collect());
+                            Continuation (i, final_trees)
+                        })
+                        .collect()
+                    );
+
+                    continuations.append(&mut next_pass.clone());
                 }
 
-                for cont in next_pass.clone() {
-                    continuations.push(cont);
-                }
-
-                if curr_pass.len() == 0 {
+                if next_pass.is_empty() {
                     break;
                 }
 
                 curr_pass = next_pass;
-            };
+            }
         },
         RuleExpression::OneOrMore(expr) => {
-            let mut curr_pass = Vec::new();
+            let mut curr_pass = Vec::new();  // This needs some work
             curr_pass.push(Continuation (token_index, vec![]));
 
-            dbg!(expr);
-
+            // Another bottleneck
             loop {
                 let mut next_pass = Vec::new();
-                for Continuation (index, _) in curr_pass.iter() {
-                    if *index == tokens.len() {
-                        continue;
-                    }
-
+                for Continuation (index, old_trees) in curr_pass.iter() {
                     parse_expr(parser, tokens, *index, expr, memo_map)?;
+                    next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
+                        .map(|Continuation (i, subtrees)| {
+                            let mut final_trees = old_trees.clone();
+                            final_trees.append(&mut subtrees.clone());
 
-                    next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone());
+                            Continuation (i, final_trees)
+                        })
+                        .collect()
+                    );
+
+                    continuations.append(&mut next_pass.clone());
                 }
 
-                for cont in next_pass.clone() {
-                    continuations.push(cont);
-                }
-
-                if curr_pass.len() == 0 {
+                if next_pass.is_empty() {
                     break;
                 }
 
                 curr_pass = next_pass;
-            };
-
-            dbg!(&continuations);
+            }
         }
     }
 
