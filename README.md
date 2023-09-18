@@ -67,6 +67,11 @@ of using a Graph Structured Stack to model multiple parsing processes at once.
 However, I did not read up on the actual algorithms that uses the GSS, I just 
 cooked up my own.
 
+**Update**: I've swapped out the GSS algorithm with a much prettier and demonstrably
+more efficient recursive algorithm. It memoizes a lot, so it resembles a dynamic
+programming approach, though the table is very jagged so I don't know if it technically
+qualifies as DP.
+
 I am unsure about the runtime - I haven't tried to determine this yet since I know
 I still want to make some optimizations. Technically, its not gauranteed to terminate,
 since left recursive formulae lead to infinite loops. These could be detected in 
@@ -113,8 +118,12 @@ any other features corresponding to alternatives or quantifiers or so on. Also, 
 to a quirk in the current algorithm, if a rule is processed but parses no tokens, it
 is not included in the final syntax tree.
 
-For instance, if we used the `OptWhitespace` rule from above, and there was no
-whitespace, then the final syntax tree will not contain OptWhitespace at all.
+**Update**: This behavior has changed recently. Now, if a rule is satisfied despite
+parsing no tokens, it will still be included in the final tree. This means there is
+a difference between `Outer: Inner?; Inner: A;` and `Outer: Inner;  Inner: A?`. They
+recognize the same language, but in the first case the Inner rule will not appear in
+the output if it didn't get to parse an `A`, where as in the second case it will appear
+in the output either way. The Many operator `*` behaves similarly.
 
 It is intended for users to write code that transforms this concrete syntax tree
 into an abstract syntax tree. This may require some careful consideration in cases
