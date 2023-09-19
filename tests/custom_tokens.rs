@@ -45,7 +45,7 @@ fn tests_work() {
         CustomToken("123".to_string()),
     ];
 
-    let tree = parser.parse_tokens(tokens, "Program").expect("Parsed successfully");
+    let tree = parser.parse_tokens(&tokens, "Program").expect("Parsed successfully");
 
     assert_eq!(indoc::indoc!{"
     Syntax Tree {
@@ -75,5 +75,5 @@ fn tests_work() {
         CustomToken("while".to_string()), // 4th while should fail
     ];
 
-    parser.parse_tokens(tokens, "Program").expect_err("Parse should fail");
+    parser.parse_tokens(&tokens, "Program").expect_err("Parse should fail");
 }

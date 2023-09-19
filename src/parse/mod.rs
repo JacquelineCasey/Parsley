@@ -132,10 +132,8 @@ impl std::fmt::Display for CharToken {
 }
 
 impl<T: Token> Parser<T> {
-    pub fn parse_tokens(&self, tokens: Vec<T>, start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
-        // gss_parse_tokens(self, tokens, start_rule)
-
-        backtracking_parse(self, &tokens, start_rule)
+    pub fn parse_tokens(&self, tokens: &[T], start_rule: &str) -> Result<SyntaxTree<T>, ParseError> {
+        backtracking_parse(self, tokens, start_rule)
     }
 }
 
@@ -143,8 +141,8 @@ impl Parser<CharToken> {
     pub fn parse_string(&self, input: &str, start_rule: &str) -> Result<SyntaxTree<CharToken>, ParseError> {
         let tokens = input.chars()
             .map(|ch| CharToken { token_type: ch.to_string() })
-            .collect();
-        self.parse_tokens(tokens, start_rule)
+            .collect::<Vec<_>>();
+        self.parse_tokens(&tokens, start_rule)
     }
 }
 

@@ -39,25 +39,22 @@ pub fn backtracking_parse<T: Token>(parser: &Parser<T>, tokens: &[T], start_rule
     parse_expr(parser, tokens, 0, &start_expr, &mut memo_map, &mut failure_info)?;
 
     if let Some(Continuation (_, trees)) = memo_map[&(ByAddress(&start_expr), 0)].clone().into_iter()
-        .filter(|Continuation (i, _)| *i == tokens.len())
-        .next() {
+            .find(|Continuation (i, _)| *i == tokens.len()) {
         
-        Ok(intermediate_to_final(Rc::clone(&trees[0])))
+        Ok(intermediate_to_final(&trees[0]))
+    }
+    else if failure_info.index < tokens.len() {
+        Err(ParseError::IncompleteParse { 
+            index: failure_info.index, 
+            terminals: failure_info.failures.into_iter().map(ToString::to_string).collect() 
+        })
+    }
+    else {
+        Err(ParseError::OutOfInput { 
+            terminals: failure_info.failures.into_iter().map(ToString::to_string).collect() 
+        })
     }
     // TODO - also handle ambiguous parse. (?)
-    else {
-        if failure_info.index < tokens.len() {
-            Err(ParseError::IncompleteParse { 
-                index: failure_info.index, 
-                terminals: failure_info.failures.iter().map(|s| s.to_string()).collect() 
-            })
-        }
-        else {
-            Err(ParseError::OutOfInput { 
-                terminals: failure_info.failures.iter().map(|s| s.to_string()).collect() 
-            })
-        }
-    }
 }
 
 // Stores failure information to allow creating nice errors.
@@ -121,32 +118,16 @@ fn parse_expr<'a, T: Token>(
                             .map(|Continuation (a, subtrees)| 
                                 Continuation (a, vec![Rc::new(IntermediateSyntaxTree::RuleNode { rule_name, subexpressions: subtrees })])
                             )
-                            .collect()
+                            .collect();
                     }
                     None => return Err("Rule not found".into()),
                 }
             },
             RuleExpression::Concatenation(exprs) => {
-                let mut curr_pass = Vec::new();  // This needs some work
-                curr_pass.push(Continuation (token_index, vec![]));
+                let mut curr_pass = vec![Continuation (token_index, vec![])];
 
-                // This is the computational bottleneck I think...
                 for expr in exprs {
-                    let mut next_pass = Vec::new();
-                    for Continuation (index, old_trees) in curr_pass.iter() {
-                        parse_expr(parser, tokens, *index, expr, memo_map, failure_info)?;
-                        next_pass.append(&mut memo_map[&(ByAddress(expr), *index)].clone().into_iter()
-                            .map(|Continuation (i, subtrees)| {
-                                let mut final_trees = old_trees.clone();
-                                final_trees.append(&mut subtrees.clone());
-
-                                Continuation (i, final_trees)
-                            })
-                            .collect()
-                        );
-                    }
-
-                    curr_pass = next_pass;
+                    curr_pass = extend_all(curr_pass, parser, tokens, expr, memo_map, failure_info)?;
                 }
 
                 continuations = curr_pass.into_iter().collect();
@@ -164,71 +145,54 @@ fn parse_expr<'a, T: Token>(
                 parse_expr(parser, tokens, token_index, expr, memo_map, failure_info)?;
                 continuations.append(&mut memo_map[&(ByAddress(&**expr), token_index)].clone());
             },
-            RuleExpression::Many(expr) => {
-                continuations.push(Continuation(token_index, vec![]));
+            RuleExpression::Many(inner_expr) | RuleExpression::OneOrMore(inner_expr) => {
+                if let RuleExpression::Many(_) = expr {
+                    continuations.push(Continuation(token_index, vec![]));
+                }
 
-                let mut curr_pass = Vec::new();  // This needs some work
-                curr_pass.push(Continuation (token_index, vec![]));
+                let mut curr_pass = vec![Continuation (token_index, vec![])];
 
-                // Another bottleneck
-                loop {
-                    let mut next_pass = Vec::new();
-                    for Continuation (index, old_trees) in curr_pass.iter() {
-                        parse_expr(parser, tokens, *index, expr, memo_map, failure_info)?;
-                        next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
-                            .map(|Continuation (i, subtrees)| {
-                                let mut final_trees = old_trees.clone();
-                                final_trees.append(&mut subtrees.clone());
+                while !curr_pass.is_empty() {
+                    curr_pass = extend_all(curr_pass, parser, tokens, inner_expr, memo_map, failure_info)?;
 
-                                Continuation (i, final_trees)
-                            })
-                            .collect()
-                        );
-
-                        continuations.append(&mut next_pass.clone());
-                    }
-
-                    if next_pass.is_empty() {
-                        break;
-                    }
-
-                    curr_pass = next_pass;
+                    continuations.append(&mut curr_pass.clone());
                 }
             },
-            RuleExpression::OneOrMore(expr) => {
-                let mut curr_pass = Vec::new();  // This needs some work
-                curr_pass.push(Continuation (token_index, vec![]));
-
-                // Another bottleneck
-                loop {
-                    let mut next_pass = Vec::new();
-                    for Continuation (index, old_trees) in curr_pass.iter() {
-                        parse_expr(parser, tokens, *index, expr, memo_map, failure_info)?;
-                        next_pass.append(&mut memo_map[&(ByAddress(&**expr), *index)].clone().into_iter()
-                            .map(|Continuation (i, subtrees)| {
-                                let mut final_trees = old_trees.clone();
-                                final_trees.append(&mut subtrees.clone());
-
-                                Continuation (i, final_trees)
-                            })
-                            .collect()
-                        );
-
-                        continuations.append(&mut next_pass.clone());
-                    }
-
-                    if next_pass.is_empty() {
-                        break;
-                    }
-
-                    curr_pass = next_pass;
-                }
-            }
         }
 
         memo_map.insert((ByAddress(expr), token_index), continuations);
         Ok(())
     })
+}
+
+// `curr_pass` is a vector of continuations. This function attempts to parse `expr`
+// from each of the continuation, generating a new vector of continuations, possibly
+// with more or fewer elements.
+// Possibly the bottleneck of the algorithm...
+fn extend_all<'a, T: Token>(
+    curr_pass: Vec<Continuation<'a, T>>,
+    parser: &'a Parser<T>, 
+    tokens: &[T], 
+    expr: &'a RuleExpression,
+    memo_map: &mut HashMap<(ByAddress<&'a RuleExpression>, usize), Vec<Continuation<'a, T>>>,
+    failure_info: &mut FailureCache<'a>
+) -> Result<Vec<Continuation<'a, T>>, ParseError> {
+
+    let mut next_pass = Vec::new();
+    for Continuation (index, old_trees) in curr_pass {
+        parse_expr(parser, tokens, index, expr, memo_map, failure_info)?;
+        next_pass.append(&mut memo_map[&(ByAddress(expr), index)].clone().into_iter()
+            .map(|Continuation (i, subtrees)| {
+                let mut final_trees = old_trees.clone();
+                final_trees.append(&mut subtrees.clone());
+
+                Continuation (i, final_trees)
+            })
+            .collect()
+        );
+    }
+
+    Ok(next_pass)
 }
 
 
@@ -238,15 +202,15 @@ enum IntermediateSyntaxTree<'a, T: Token> { // Vec contains Rc's, to be removed 
     TokenNode (T)
 }
 
-fn intermediate_to_final<T: Token>(root: Rc<IntermediateSyntaxTree<T>>) -> SyntaxTree<T> {
-    match (*root).clone() {
+fn intermediate_to_final<T: Token>(root: &Rc<IntermediateSyntaxTree<T>>) -> SyntaxTree<T> {
+    match &*root.clone() {
         IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
             SyntaxTree::RuleNode {
-                rule_name: rule_name.to_string(), 
-                subexpressions: subexpressions.into_iter()
+                rule_name: (*rule_name).to_string(), 
+                subexpressions: subexpressions.iter()
                     .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
                     .collect()
             },
-        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token),
+        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token.clone()),
     }
 }
