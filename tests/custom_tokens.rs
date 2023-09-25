@@ -27,7 +27,7 @@ impl std::fmt::Display for CustomToken {
 
 
 #[test]
-fn tests_work() {
+fn custom_tokens() {
     let parser = parsley::define_parser::<CustomToken>(r#"
         Program : Loop Loop Loop ;
 

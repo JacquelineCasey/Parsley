@@ -101,7 +101,7 @@ pub trait Token : Sized + std::fmt::Debug + Clone {
      * 
      * Notably, CharToken provides this feature as the main way to match terminals. 
      * Most custom token types will not need to provide this. */
-     fn type_sequence_from_literal(_literal: &str) -> Option<Vec<String>> {
+    fn type_sequence_from_literal(_literal: &str) -> Option<Vec<String>> {
         None
     }
 }
