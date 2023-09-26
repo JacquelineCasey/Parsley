@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 /* Public Interface */
 
 pub struct Parser<T: Token> {
-    pub(crate) phantom: std::marker::PhantomData<T>,  // Act like we own a T
+    pub(crate) phantom: std::marker::PhantomData<fn(&T)->T>,  // Act like we own a function mapping "Something that borrows T" to "Something that owns T"
     pub(crate) rules: HashMap<String, RuleExpression>
 }
 
