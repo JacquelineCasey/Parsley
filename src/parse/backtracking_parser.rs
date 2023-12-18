@@ -203,14 +203,17 @@ enum IntermediateSyntaxTree<'a, T: Token> { // Vec contains Rc's, to be removed 
 }
 
 fn intermediate_to_final<T: Token>(root: &Rc<IntermediateSyntaxTree<T>>) -> SyntaxTree<T> {
-    match &*root.clone() {
-        IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
-            SyntaxTree::RuleNode {
-                rule_name: (*rule_name).to_string(), 
-                subexpressions: subexpressions.iter()
-                    .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
-                    .collect()
-            },
-        IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token.clone()),
-    }
+    // Prevent stack overflow by allocating additional stack as required.
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        match &*root.clone() {
+            IntermediateSyntaxTree::RuleNode {rule_name, subexpressions} => 
+                SyntaxTree::RuleNode {
+                    rule_name: (*rule_name).to_string(), 
+                    subexpressions: subexpressions.iter()
+                        .map(|rc_refcell_tree| intermediate_to_final(rc_refcell_tree))
+                        .collect()
+                },
+            IntermediateSyntaxTree::TokenNode(token) => SyntaxTree::TokenNode(token.clone()),
+        }
+    })
 }
